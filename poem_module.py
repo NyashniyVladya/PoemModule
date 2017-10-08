@@ -5,16 +5,25 @@
 @author: Vladya
 """
 
-from MarkovTextGenerator.markov_text_generator import MarkovTextGenerator
+import json
+from urllib import parse
+from requests import Session
+from bs4 import BeautifulSoup
 from os.path import (
     abspath,
     isfile,
     expanduser
 )
-from urllib import parse
-from requests import Session
-from bs4 import BeautifulSoup
-import json
+from MarkovTextGenerator.markov_text_generator import (
+    MarkovTextGenerator,
+    MarkovTextExcept,
+    choices,
+    choice
+)
+
+
+class NotVariantExcept(Exception):
+    pass
 
 
 class RhymeCreator(Session):
@@ -79,13 +88,19 @@ class RhymeCreator(Session):
 
 class Poem(object):
 
-    def __init__(self, poet_object, verse="abab", *start_words):
+    def __init__(self, poet_object, verse="abab", size=(9, 8), *start_words):
 
         self.poet = poet_object
         self.verse = verse
-        self.start_words = start_words
+        self.start_words = list(start_words)
 
         self.string_storage = dict.fromkeys(self.verse, [])
+
+        _set_verse = set(verse)
+        if len(_set_verse) != len(size):
+            raise Exception("Ритм и указание размеров не совпадают.")
+
+        self.sizes = dict(zip(sorted(_set_verse), size))
 
         self.poem = ""
 
@@ -112,10 +127,10 @@ class Poem(object):
 
     def set_rhyme_construct(self, key):
         try_counter = 0
+        string_size = self.sizes[key]
         while True:
             try_counter += 1
             need_rhymes = ()
-            string_size = 0
             _loop_counter = 0
             self.string_storage[key] = []
             print(
@@ -130,8 +145,11 @@ class Poem(object):
                     break
 
                 rhymes = need_rhymes or self.start_words
+                try:
+                    string = tuple(self.poet._get_generate_tokens(*rhymes))
+                except NotVariantExcept:
+                    continue
 
-                string = tuple(self.poet._get_generate_tokens(*rhymes))
                 if not string_size:
                     string_size = self._syllable_calculate_in_tuple(string)
                     if string_size not in range(5, 11):
@@ -142,11 +160,16 @@ class Poem(object):
                     continue
                 if self._syllable_calculate_in_tuple(string) != string_size:
                     continue
+
                 _loop_counter = 0
                 self.string_storage[key].append(string)
                 if len(self.string_storage[key]) >= self.verse.count(key):
                     return
                 need_rhymes = self.get_rhyme_words(string)
+
+            if self.start_words:
+                if try_counter > 15:
+                    self.start_words = []
 
     def tuple_to_string(self, string_tuple):
         out_text = ""
@@ -219,6 +242,35 @@ class Poet(MarkovTextGenerator):
             else:
                 yield token
 
+    def get_start_array(self, *start_words):
+        """
+        Перегрузка стандартной функции.
+        Если не находит нужного предложения, бросает исключение.
+        """
+        if not self.start_arrays:
+            raise MarkovTextExcept("Не с чего начинать генерацию.")
+        if not start_words:
+            return choice(self.start_arrays)
+
+        _variants = []
+        _weights = []
+        for tokens in self.start_arrays:
+            weight = 0
+            for word in start_words:
+                word = word.strip().lower()
+                for token in self.ONLY_WORDS.finditer(word):
+                    token = token.group()
+                    if token in tokens:
+                        weight += 1
+            if weight:
+                _variants.append(tokens)
+                _weights.append(weight)
+
+        if not _variants:
+            raise NotVariantExcept("Варианты не найдены.")
+
+        return choices(_variants, weights=_weights, k=1)[0]
+
     def update(self, data, fromfile=True):
         """
         Перегрузка функции, с обратным расположением токенов.
@@ -230,8 +282,8 @@ class Poet(MarkovTextGenerator):
             self.create_base()
         self.create_dump()
 
-    def write_poem(self, verse, *start_words):
-        poem = Poem(self, verse, *start_words)
+    def write_poem(self, verse="abab", size=(9, 8), *start_words):
+        poem = Poem(self, verse, size, *start_words)
         poem.create_poem()
         _poem = poem.poem
         self.poems.append(_poem)
