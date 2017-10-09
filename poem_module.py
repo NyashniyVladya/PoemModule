@@ -111,12 +111,14 @@ class Poem(object):
         return True
 
     def get_rhyme_words(self, string_tuple):
+
         for s in string_tuple:
             if not self.poet.rhyme_dictionary.is_rus_word(s):
                 continue
             rhyme = self.poet.rhyme_dictionary.get_rhyme(s)
             if rhyme:
                 return rhyme
+            return []
         return []
 
     def _syllable_calculate_in_tuple(self, string):
@@ -148,7 +150,7 @@ class Poem(object):
                 try:
                     string = tuple(self.poet._get_generate_tokens(*rhymes))
                 except NotVariantExcept:
-                    continue
+                    break
 
                 if not string_size:
                     string_size = self._syllable_calculate_in_tuple(string)
@@ -161,11 +163,15 @@ class Poem(object):
                 if self._syllable_calculate_in_tuple(string) != string_size:
                     continue
 
+                _need_rhymes = self.get_rhyme_words(string)
+                if not _need_rhymes:
+                    continue
+                need_rhymes = _need_rhymes
+
                 _loop_counter = 0
                 self.string_storage[key].append(string)
                 if len(self.string_storage[key]) >= self.verse.count(key):
                     return
-                need_rhymes = self.get_rhyme_words(string)
 
             if self.start_words:
                 if try_counter > 15:
@@ -197,11 +203,12 @@ class Poet(MarkovTextGenerator):
     vowels = "ауоыиэяюеёaeiouy"
     tokensBase = "poetModuleTokens"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *ar, **kw):
+        super().__init__(*ar, **kw)
 
         self.rhyme_dictionary = RhymeCreator()
         self.poems = []
+        self.vocabulars_in_tokens = []
 
         self.dump_file = abspath(expanduser("~\\poemModuleDatabase.json"))
         if not isfile(self.dump_file):
@@ -211,7 +218,8 @@ class Poet(MarkovTextGenerator):
     def create_dump(self):
         _dump_data = {
             "poems": self.poems,
-            "tokens": self.tokens_array
+            "tokens": self.tokens_array,
+            "vocabulars": self.vocabulars_in_tokens
         }
         with open(self.dump_file, "w", encoding="utf-8") as js_file:
             json.dump(_dump_data, js_file, ensure_ascii=False)
@@ -221,6 +229,7 @@ class Poet(MarkovTextGenerator):
             _dump_data = json.load(js_file)
         self.poems = _dump_data["poems"]
         self.tokens_array = tuple(_dump_data["tokens"])
+        self.vocabulars_in_tokens = _dump_data["vocabulars"]
         self.create_base()
 
     def syllable_calculate(self, string_data):
@@ -289,3 +298,22 @@ class Poet(MarkovTextGenerator):
         self.poems.append(_poem)
         self.create_dump()
         return _poem
+
+    def add_vocabulary(self, peer_id, from_dialogue=None, update=False):
+        vocabular_name = "{0}_{1}".format(peer_id, from_dialogue)
+        if vocabular_name in self.vocabulars_in_tokens:
+            return
+        new_data = tuple(
+            self._get_reversed_tokens(
+                self.get_vocabulary(
+                    peer_id,
+                    from_dialogue,
+                    update
+                )
+            )
+        )
+        if new_data:
+            self.tokens_array = new_data + self.tokens_array
+            self.create_base()
+            self.vocabulars_in_tokens.append(vocabular_name)
+        self.create_dump()
