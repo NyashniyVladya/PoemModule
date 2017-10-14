@@ -59,12 +59,9 @@ class _SessionParent(Session):
             self.database = dict(json.load(js_file))
 
 
-
 class AccentuationCreator(_SessionParent):
 
-
     URL = "http://где-ударение.рф/в-слове-{0}"
-
 
     def __init__(self, poet_module):
         super().__init__("accentuations")
@@ -89,7 +86,6 @@ class AccentuationCreator(_SessionParent):
         self.database[word] = syllable_numbers
         self.create_dump()
         return syllable_numbers
-
 
     def _get_syllable_num(self, word):
         """
@@ -133,8 +129,6 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-
-
     def __get_accentuation_from_network(self, word):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
@@ -152,6 +146,7 @@ class AccentuationCreator(_SessionParent):
         accs = list(self.ask_for_user(word))
         assert accs
         return accs
+
 
 class RhymeCreator(_SessionParent):
 
@@ -205,11 +200,9 @@ class Poem(object):
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
-
         self.sizes = dict(self.__get_size_dict(verse, size, meter))
 
         self.poem = ""
-
 
     def __get_size_dict(self, verse, size, meter):
 
@@ -219,7 +212,6 @@ class Poem(object):
 
         for str_name, str_size in zip(sorted(_set_verse), size):
             yield (str_name, (str_size, self.get_re_meter(str_size, meter)))
-
 
     def get_re_meter(self, size, meter):
         """
@@ -234,8 +226,6 @@ class Poem(object):
                 part = "[01]"
             final_meter += part
         return re_compile(final_meter)
-
-
 
     def is_unique_string(self, string):
         for string_list in self.string_storage.values():
@@ -354,7 +344,6 @@ class Poet(MarkovTextGenerator):
         self.vocabulars_in_tokens = _dump_data["vocabulars"]
         self.create_base()
 
-
     def get_rhyme_words(self, string_tuple):
 
         for s in string_tuple:
@@ -365,7 +354,6 @@ class Poet(MarkovTextGenerator):
                 return rhyme
             return []
         return []
-
 
     def get_string_meter(self, string_typle):
         """
@@ -385,13 +373,11 @@ class Poet(MarkovTextGenerator):
         print(result)
         return result
 
-
     def _syll_calculate_in_tuple(self, string):
         syllables = 0
         for s in string:
             syllables += self.syllable_calculate(s)
         return syllables
-
 
     def syllable_calculate(self, string_data):
         """
