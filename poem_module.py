@@ -9,6 +9,8 @@ import json
 from urllib import parse
 from requests import Session
 from bs4 import BeautifulSoup
+from itertools import cycle
+from re import compile as re_compile
 from os.path import (
     abspath,
     isfile,
@@ -26,12 +28,9 @@ class NotVariantExcept(Exception):
     pass
 
 
-class RhymeCreator(Session):
+class _SessionParent(Session):
 
-    URL = "http://rifme.net/r/"
-    RUS = tuple(map(chr, range(1072, 1106)))
-
-    def __init__(self):
+    def __init__(self, file_db):
         super().__init__()
         self.headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 6.3; WOW64) "
@@ -40,19 +39,16 @@ class RhymeCreator(Session):
             "Safari/537.36 "
             "OPR/48.0.2685.32"
         )
-        self.rhyme_database = {}
-        self.file_database = abspath(expanduser("~\\rhymes.json"))
+        self.database = {}
+        self.file_database = abspath(expanduser("~\\{0}.json".format(file_db)))
         if not isfile(self.file_database):
             self.create_dump()
         self.load_dump()
 
-    def is_rus_word(self, word):
-        return all(map(lambda s: (s.lower() in self.RUS), word))
-
     def create_dump(self):
         with open(self.file_database, "w", encoding="utf-8") as js_file:
             json.dump(
-                self.rhyme_database,
+                self.database,
                 js_file,
                 ensure_ascii=False,
                 indent=4
@@ -60,14 +56,120 @@ class RhymeCreator(Session):
 
     def load_dump(self):
         with open(self.file_database, "rb") as js_file:
-            self.rhyme_database = dict(json.load(js_file))
+            self.database = dict(json.load(js_file))
+
+
+
+class AccentuationCreator(_SessionParent):
+
+
+    URL = "http://где-ударение.рф/в-слове-{0}"
+
+
+    def __init__(self, poet_module):
+        super().__init__("accentuations")
+
+        self.poet_module = poet_module
+
+    def get_acc(self, word):
+        """
+        Возвращает кортеж номеров слогов, где можно поставить ударение.
+        В большинстве случаев число будет одно.
+        Несколько - в словах, с допуском, как "творог".
+        """
+        word = word.lower().strip()
+        syllable_numbers = self.database.get(word, None)
+        if isinstance(syllable_numbers, list):
+            return syllable_numbers
+        sylls = self.poet_module.syllable_calculate(word)
+        if sylls <= 1:
+            syllable_numbers = [sylls]
+        else:
+            syllable_numbers = self.__get_accentuation_from_network(word)
+        self.database[word] = syllable_numbers
+        self.create_dump()
+        return syllable_numbers
+
+
+    def _get_syllable_num(self, word):
+        """
+        Возвращает номер слога, по большой букве в написании.
+        """
+        syllable = 0
+        for let in word:
+            if let.lower() in self.poet_module.vowels:
+                syllable += 1
+                if let.isupper():
+                    return syllable
+        return syllable
+
+    def ask_for_user(self, word):
+        """
+        Спрашивает про ударение у пользователя,
+        на случай, если в сети информации нет.
+        """
+        q = input(
+            (
+                "Где ударение в слове {0!r}?\n"
+                "(Ответ - номера слогов, цифрой, через запятую)\n"
+            ).format(word)
+        )
+        for part in q.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if part.isdigit():
+                yield int(part)
+
+    def __get_format_words(self, answer_page):
+        """
+        Парсит страницу и возвращает номера слогов ударений.
+        """
+        acc_rule = answer_page.findChild(attrs={"class": "rule"})
+        if acc_rule:
+            answer_string = acc_rule.getText().strip()[:-1]
+            for part in answer_string.split(","):
+                word = part.split(chr(8212))[-1].strip()
+                if word:
+                    yield self._get_syllable_num(word)
+
+
+
+    def __get_accentuation_from_network(self, word):
+        """
+        Определяет ударения. Сначала ищет информацию в интернете.
+        Если безуспешно - спрашивает пользователя.
+        Возвращает список чисел.
+        """
+        _url = self.URL.format(word)
+        req = self.get(_url)
+        if req.status_code == 200:
+            page = BeautifulSoup(req.text, "lxml")
+            accs = list(self.__get_format_words(page))
+            if accs:
+                return accs
+
+        accs = list(self.ask_for_user(word))
+        assert accs
+        return accs
+
+class RhymeCreator(_SessionParent):
+
+    URL = "http://rifme.net/r/"
+    RUS = tuple(map(chr, range(1072, 1106)))
+
+    def __init__(self):
+        super().__init__("rhymes")
+
+    def is_rus_word(self, word):
+        return all(map(lambda s: (s.lower() in self.RUS), word))
 
     def get_rhyme(self, word):
         word = word.lower().strip()
-        rhymes = self.rhyme_database.get(word, None)
+        rhymes = self.database.get(word, None)
         if rhymes is not None:
             return rhymes
-        rhymes = self.rhyme_database[word] = list(
+        rhymes = self.database[word] = list(
             self.__get_rhymes_from_network(word)
         )
         self.create_dump()
@@ -88,7 +190,14 @@ class RhymeCreator(Session):
 
 class Poem(object):
 
-    def __init__(self, poet_object, verse="abab", size=(9, 8), *start_words):
+    def __init__(
+        self,
+        poet_object,
+        verse="abab",
+        size=(9, 8),
+        meter="10",
+        *start_words
+    ):
 
         self.poet = poet_object
         self.verse = verse
@@ -96,13 +205,37 @@ class Poem(object):
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
+
+        self.sizes = dict(self.__get_size_dict(verse, size, meter))
+
+        self.poem = ""
+
+
+    def __get_size_dict(self, verse, size, meter):
+
         _set_verse = set(verse)
         if len(_set_verse) != len(size):
             raise Exception("Ритм и указание размеров не совпадают.")
 
-        self.sizes = dict(zip(sorted(_set_verse), size))
+        for str_name, str_size in zip(sorted(_set_verse), size):
+            yield (str_name, (str_size, self.get_re_meter(str_size, meter)))
 
-        self.poem = ""
+
+    def get_re_meter(self, size, meter):
+        """
+        Возвращает объект регулярного выражения,
+        соответствующего нужному метру.
+        """
+        final_meter = ""
+        for ind, part in enumerate(cycle(meter)):
+            if ind >= size:
+                break
+            if part == '1':
+                part = "[01]"
+            final_meter += part
+        return re_compile(final_meter)
+
+
 
     def is_unique_string(self, string):
         for string_list in self.string_storage.values():
@@ -110,26 +243,9 @@ class Poem(object):
                 return False
         return True
 
-    def get_rhyme_words(self, string_tuple):
-
-        for s in string_tuple:
-            if not self.poet.rhyme_dictionary.is_rus_word(s):
-                continue
-            rhyme = self.poet.rhyme_dictionary.get_rhyme(s)
-            if rhyme:
-                return rhyme
-            return []
-        return []
-
-    def _syllable_calculate_in_tuple(self, string):
-        syllables = 0
-        for s in string:
-            syllables += self.poet.syllable_calculate(s)
-        return syllables
-
     def set_rhyme_construct(self, key):
         try_counter = 0
-        string_size = self.sizes[key]
+        string_size, string_meter = self.sizes[key]
         while True:
             try_counter += 1
             need_rhymes = ()
@@ -153,19 +269,24 @@ class Poem(object):
                     break
 
                 if not string_size:
-                    string_size = self._syllable_calculate_in_tuple(string)
+                    string_size = self.poet._syll_calculate_in_tuple(string)
                     if string_size not in range(5, 11):
                         string_size = 0
                         continue
 
                 if not self.is_unique_string(string):
                     continue
-                if self._syllable_calculate_in_tuple(string) != string_size:
+                if self.poet._syll_calculate_in_tuple(string) != string_size:
                     continue
 
-                _need_rhymes = self.get_rhyme_words(string)
+                _need_rhymes = self.poet.get_rhyme_words(string)
                 if not _need_rhymes:
                     continue
+
+                _temp_string_meter = self.poet.get_string_meter(string)
+                if not string_meter.search(_temp_string_meter):
+                    continue
+
                 need_rhymes = _need_rhymes
 
                 _loop_counter = 0
@@ -207,6 +328,7 @@ class Poet(MarkovTextGenerator):
         super().__init__(*ar, **kw)
 
         self.rhyme_dictionary = RhymeCreator()
+        self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.poems = []
         self.vocabulars_in_tokens = []
 
@@ -231,6 +353,45 @@ class Poet(MarkovTextGenerator):
         self.tokens_array = tuple(_dump_data["tokens"])
         self.vocabulars_in_tokens = _dump_data["vocabulars"]
         self.create_base()
+
+
+    def get_rhyme_words(self, string_tuple):
+
+        for s in string_tuple:
+            if not self.rhyme_dictionary.is_rus_word(s):
+                continue
+            rhyme = self.rhyme_dictionary.get_rhyme(s)
+            if rhyme:
+                return rhyme
+            return []
+        return []
+
+
+    def get_string_meter(self, string_typle):
+        """
+        Определяет стихотворный метр строки.
+        """
+
+        result = ""
+        for token in reversed(string_typle):
+            if not token.isalpha():
+                continue
+            accentuations = self.accentuation_dictionary.get_acc(token)
+            _syllables = 0
+            for let in token:
+                if let.lower() in self.vowels:
+                    _syllables += 1
+                    result += str(int(bool((_syllables in accentuations))))
+        print(result)
+        return result
+
+
+    def _syll_calculate_in_tuple(self, string):
+        syllables = 0
+        for s in string:
+            syllables += self.syllable_calculate(s)
+        return syllables
+
 
     def syllable_calculate(self, string_data):
         """
@@ -291,8 +452,8 @@ class Poet(MarkovTextGenerator):
             self.create_base()
         self.create_dump()
 
-    def write_poem(self, verse="abab", size=(9, 8), *start_words):
-        poem = Poem(self, verse, size, *start_words)
+    def write_poem(self, verse="abab", size=(9, 8), meter="10", *start_words):
+        poem = Poem(self, verse, size, meter, *start_words)
         poem.create_poem()
         _poem = poem.poem
         self.poems.append(_poem)
