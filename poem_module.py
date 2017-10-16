@@ -96,7 +96,6 @@ class AccentuationCreator(_SessionParent):
 
             syllable_numbers = sorted(set(syllable_numbers))
 
-
         self.database[word] = syllable_numbers
         self.create_dump()
         return syllable_numbers
