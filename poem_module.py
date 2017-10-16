@@ -11,6 +11,7 @@ from requests import Session
 from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
+from time import sleep
 from os.path import (
     abspath,
     isfile,
@@ -68,6 +69,9 @@ class AccentuationCreator(_SessionParent):
 
         self.poet_module = poet_module
 
+        self.question = None
+        self.answer = None
+
     def get_acc(self, word):
         """
         Возвращает кортеж номеров слогов, где можно поставить ударение.
@@ -79,10 +83,20 @@ class AccentuationCreator(_SessionParent):
         if isinstance(syllable_numbers, list):
             return syllable_numbers
         sylls = self.poet_module.syllable_calculate(word)
-        if sylls <= 1:
-            syllable_numbers = [sylls]
+
+        if sylls <= 0:
+            syllable_numbers = [0]
+        elif sylls == 1:
+            syllable_numbers = [1]
         else:
-            syllable_numbers = self.__get_accentuation_from_network(word)
+            syllable_numbers = self._get_accentuation(word)
+            for ind, n in enumerate(syllable_numbers[:]):
+                if n > sylls:
+                    syllable_numbers[ind] = sylls
+
+            syllable_numbers = sorted(set(syllable_numbers))
+
+
         self.database[word] = syllable_numbers
         self.create_dump()
         return syllable_numbers
@@ -99,18 +113,49 @@ class AccentuationCreator(_SessionParent):
                     return syllable
         return syllable
 
-    def ask_for_user(self, word):
+    def ask_to_vk(self, question_text):
+        if not self.poet_module.vk_object:
+            return
+        self.question = (
+            self.poet_module.vk_object._feedback_text_title + question_text
+        )
+        self.answer = None
+        _user_for_question = choice(
+            self.poet_module.vk_object.poem_module_testers
+        )
+        self.poet_module.vk_object.sent(
+            target=_user_for_question,
+            text=self.question
+        )
+        print("Ожидание ответа...")
+        while not self.answer:
+            sleep(1.)
+        print("Ответ {0!r} получен.".format(self.answer))
+        _answer = self.answer
+        self.question = self.answer = None
+        return _answer
+
+    def ask_for_user(self, word, use_vk=True):
         """
         Спрашивает про ударение у пользователя,
         на случай, если в сети информации нет.
         """
-        q = input(
-            (
-                "Где ударение в слове {0!r}?\n"
-                "(Ответ - номера слогов, цифрой, через запятую)\n"
-            ).format(word)
-        )
-        for part in q.split(","):
+        if use_vk:
+            use_vk = bool(self.poet_module.vk_object)
+
+        qu = (
+            "[стихомодуль]\n"
+            "Где ударение в слове {0!r}?\n"
+            "(Ответ - номера слогов, цифрой, через запятую)\n"
+        ).format(word)
+
+        an = None
+        if use_vk:
+            an = self.ask_to_vk(qu)
+        if not an:
+            an = input(qu)
+
+        for part in an.split(","):
             part = part.strip()
             if not part:
                 continue
@@ -129,7 +174,7 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def __get_accentuation_from_network(self, word):
+    def _get_accentuation(self, word, everlasting_try_vk=True):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
@@ -143,7 +188,14 @@ class AccentuationCreator(_SessionParent):
             if accs:
                 return accs
 
-        accs = list(self.ask_for_user(word))
+        while True:
+            accs = list(self.ask_for_user(word))
+            if accs:
+                return accs
+            if not everlasting_try_vk:
+                break
+
+        accs = list(self.ask_for_user(word, False))
         assert accs
         return accs
 
