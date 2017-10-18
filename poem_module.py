@@ -23,10 +23,72 @@ from MarkovTextGenerator.markov_text_generator import (
     choices,
     choice
 )
+from selenium.webdriver import Chrome
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 class NotVariantExcept(Exception):
     pass
+
+
+class MorpherAccentizer(Chrome):
+
+    URL = "http://morpher.ru/accentizer"
+    textAreaName = "ctl00$ctl00$BodyPlaceHolder$ContentPlaceHolder1$TextBox1"
+    buttonName = "ctl00$ctl00$BodyPlaceHolder$ContentPlaceHolder1$SubmitButton"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__wait_object = WebDriverWait(self, 120)
+        self.get(self.URL)
+
+    def format_word(self, word):
+        """
+        Изменяет символ ударения на большую букву, в месте ударения.
+        Если ударения нет - возвращает None.
+        """
+        if chr(769) not in word:
+            return None
+        new_word = []
+        for s in word.strip():
+            if s == chr(769):
+                if new_word:
+                    new_word[-1] = new_word[-1].upper()
+                continue
+            new_word.append(s.lower())
+        return "".join(new_word)
+
+    def get_acc(self, word):
+        """
+        Ищет ударение на сайте. Возвращает либо кортеж вариантов, либо None.
+        """
+
+        area = self._wait_element(self.textAreaName)
+        button = self._wait_element(self.buttonName)
+
+        area.clear()
+        area.send_keys(word.strip().lower())
+        button.click()
+
+        new_area = self._wait_element(self.textAreaName)
+
+        result = tuple(
+            filter(bool, map(self.format_word, new_area.text.split(chr(124))))
+        )
+        return (result or None)
+
+    def _wait_element(self, element_name):
+        """
+        Ожидает загрузки элемента, указанного в statement, и возвращает его.
+        """
+        return self.__wait_object.until(
+            expected_conditions.visibility_of_element_located(
+                (By.NAME, element_name)
+            ),
+            "Превышено время ожидания элемента {0!r}.".format(element_name)
+        )
 
 
 class _SessionParent(Session):
@@ -71,6 +133,8 @@ class AccentuationCreator(_SessionParent):
 
         self.question = None
         self.answer = None
+
+        self.morpher = MorpherAccentizer()
 
     def get_acc(self, word):
         """
@@ -173,11 +237,13 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def _get_accentuation(self, word, everlasting_try_vk=True):
+    def _get_accentuation(self, word, ask_user=False, everlasting_try_vk=True):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
         Возвращает список чисел.
+
+        :ask_user: Если True, будет спрашивать пользователя, в случае неудачи.
         """
         _url = self.URL.format(word)
         req = self.get(_url)
@@ -187,6 +253,13 @@ class AccentuationCreator(_SessionParent):
             if accs:
                 return accs
 
+        words = self.morpher.get_acc(word)
+        if words:
+            return list(map(self._get_syllable_num, words))
+
+        if not ask_user:
+            raise NotVariantExcept("Ударение в сети не найдено.")
+
         while True:
             accs = list(self.ask_for_user(word))
             if accs:
@@ -195,7 +268,8 @@ class AccentuationCreator(_SessionParent):
                 break
 
         accs = list(self.ask_for_user(word, False))
-        assert accs
+        if not accs:
+            raise NotVariantExcept("Ударение не определено.")
         return accs
 
 
@@ -285,8 +359,10 @@ class Poem(object):
         return True
 
     def set_rhyme_construct(self, key):
+
         try_counter = 0
         string_size, string_meter = self.sizes[key]
+
         while True:
             try_counter += 1
             need_rhymes = ()
@@ -324,7 +400,11 @@ class Poem(object):
                 if not _need_rhymes:
                     continue
 
-                _temp_string_meter = self.poet.get_string_meter(string)
+                try:
+                    _temp_string_meter = self.poet.get_string_meter(string)
+                except NotVariantExcept:
+                    continue
+
                 if not string_meter.search(_temp_string_meter):
                     continue
 
