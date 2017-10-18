@@ -134,7 +134,7 @@ class AccentuationCreator(_SessionParent):
         self.question = None
         self.answer = None
 
-        self.morpher = MorpherAccentizer()
+        self.morpher = None
 
     def get_acc(self, word):
         """
@@ -253,9 +253,10 @@ class AccentuationCreator(_SessionParent):
             if accs:
                 return accs
 
-        words = self.morpher.get_acc(word)
-        if words:
-            return list(map(self._get_syllable_num, words))
+        if self.morpher:
+            words = self.morpher.get_acc(word)
+            if words:
+                return list(map(self._get_syllable_num, words))
 
         if not ask_user:
             raise NotVariantExcept("Ударение в сети не найдено.")
@@ -569,13 +570,18 @@ class Poet(MarkovTextGenerator):
             self.create_base()
         self.create_dump()
 
-    def write_poem(self, verse="abab", size=(9, 8), meter="10", *start_words):
-        poem = Poem(self, verse, size, meter, *start_words)
-        poem.create_poem()
-        _poem = poem.poem
-        self.poems.append(_poem)
-        self.create_dump()
-        return _poem
+    def write_poem(self, verse="abab", size=(8, 7), meter="10", *start_words):
+        self.accentuation_dictionary.morpher = MorpherAccentizer()
+        try:
+            poem = Poem(self, verse, size, meter, *start_words)
+            poem.create_poem()
+            _poem = poem.poem
+            self.poems.append(_poem)
+            self.create_dump()
+            return _poem
+        finally:
+            self.accentuation_dictionary.morpher.quit()
+            self.accentuation_dictionary.morpher = None
 
     def add_vocabulary(self, peer_id, from_dialogue=None, update=False):
         vocabular_name = "{0}_{1}".format(peer_id, from_dialogue)
