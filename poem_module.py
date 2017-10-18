@@ -423,7 +423,7 @@ class Poem(object):
     def tuple_to_string(self, string_tuple):
         out_text = ""
         for token in reversed(string_tuple):
-            if token in "$^":
+            if (token in "$^") or token.isdigit():
                 continue
             if self.poet.ONLY_WORDS.search(token):
                 out_text += " "
