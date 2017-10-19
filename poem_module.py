@@ -41,7 +41,7 @@ class MorpherAccentizer(Chrome):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.__wait_object = WebDriverWait(self, 120)
+        self.__wait_object = WebDriverWait(self, 300)
         self.get(self.URL)
 
     def format_word(self, word):
