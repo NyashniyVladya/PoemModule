@@ -363,6 +363,7 @@ class Poem(object):
 
         try_counter = 0
         string_size, string_meter = self.sizes[key]
+        _start_words = self.start_words
 
         while True:
             try_counter += 1
@@ -377,10 +378,10 @@ class Poem(object):
             )
             while True:
                 _loop_counter += 1
-                if _loop_counter > 5:
+                if _loop_counter > 10:
                     break
 
-                rhymes = need_rhymes or self.start_words
+                rhymes = need_rhymes or _start_words
                 try:
                     string = tuple(self.poet._get_generate_tokens(*rhymes))
                 except NotVariantExcept:
@@ -416,9 +417,9 @@ class Poem(object):
                 if len(self.string_storage[key]) >= self.verse.count(key):
                     return
 
-            if self.start_words:
-                if try_counter > 15:
-                    self.start_words = []
+            if _start_words:
+                if try_counter > 1000:
+                    _start_words = []
 
     def tuple_to_string(self, string_tuple):
         out_text = ""
