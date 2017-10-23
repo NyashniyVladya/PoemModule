@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
 from time import sleep
+from itertools import count
 from os.path import (
     abspath,
     isfile,
@@ -120,6 +121,41 @@ class _SessionParent(Session):
     def load_dump(self):
         with open(self.file_database, "rb") as js_file:
             self.database = dict(json.load(js_file))
+
+
+class SynonymsCreator(_SessionParent):
+
+    URL = "http://sinonim.org/s/"
+
+    def __init__(self, poet_module):
+        super().__init__("synonyms")
+
+        self.poet_module = poet_module
+
+    def get_words(self, page):
+        for i in count(1):
+           element = page.findChild(attrs={"id": "tr{0}".format(i)})
+           if not element:
+               break
+           word_elem = tuple(element.childGenerator())[-2]
+           word = word_elem.getText().lower().strip()
+           if self.poet_module.rhyme_dictionary.is_rus_word(word):
+               yield word
+
+
+    def get_synonyms(self, word):
+        word = word.strip().lower()
+        words = self.database.get(word, None)
+        if words:
+            return words
+        _url = parse.urljoin(self.URL, parse.quote(word))
+        req = self.get(_url)
+        if req.status_code != 200:
+            return []
+        page = BeautifulSoup(req.text, "lxml")
+        self.database[word] = words = list(self.get_words(page))
+        self.create_dump()
+        return words
 
 
 class AccentuationCreator(_SessionParent):
@@ -283,6 +319,8 @@ class RhymeCreator(_SessionParent):
         super().__init__("rhymes")
 
     def is_rus_word(self, word):
+        if not word:
+            return False
         return all(map(lambda s: (s.lower() in self.RUS), word))
 
     def get_rhyme(self, word):
@@ -452,6 +490,7 @@ class Poet(MarkovTextGenerator):
 
         self.rhyme_dictionary = RhymeCreator()
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
+        self.synonyms_dictionary = SynonymsCreator(poet_module=self)
         self.poems = []
         self.vocabulars_in_tokens = []
 
@@ -572,9 +611,14 @@ class Poet(MarkovTextGenerator):
         self.create_dump()
 
     def write_poem(self, verse="abab", size=(8, 7), meter="10", *start_words):
+        _start_words = []
+        for word in start_words:
+            _start_words.append(word)
+            _start_words.extend(self.synonyms_dictionary.get_synonyms(word))
+
         self.accentuation_dictionary.morpher = MorpherAccentizer()
         try:
-            poem = Poem(self, verse, size, meter, *start_words)
+            poem = Poem(self, verse, size, meter, *_start_words)
             poem.create_poem()
             _poem = poem.poem
             self.poems.append(_poem)
