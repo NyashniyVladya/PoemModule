@@ -134,14 +134,13 @@ class SynonymsCreator(_SessionParent):
 
     def get_words(self, page):
         for i in count(1):
-           element = page.findChild(attrs={"id": "tr{0}".format(i)})
-           if not element:
-               break
-           word_elem = tuple(element.childGenerator())[-2]
-           word = word_elem.getText().lower().strip()
-           if self.poet_module.rhyme_dictionary.is_rus_word(word):
-               yield word
-
+            element = page.findChild(attrs={"id": "tr{0}".format(i)})
+            if not element:
+                break
+            word_elem = tuple(element.childGenerator())[-2]
+            word = word_elem.getText().lower().strip()
+            if self.poet_module.rhyme_dictionary.is_rus_word(word):
+                yield word
 
     def get_synonyms(self, word):
         word = word.strip().lower()
@@ -401,7 +400,7 @@ class Poem(object):
 
         try_counter = 0
         string_size, string_meter = self.sizes[key]
-        _start_words = self.start_words
+        _start_words = tuple(self.poet._get_synonyms(self.start_words))
 
         while True:
             try_counter += 1
@@ -456,8 +455,14 @@ class Poem(object):
                     return
 
             if _start_words:
-                if try_counter > 1000:
-                    _start_words = []
+                _hundred = try_counter / 100
+                if _hundred < 10.:
+                    if _hundred.is_integer():
+                        _start_words = tuple(
+                            self.poet._get_synonyms(_start_words)
+                        )
+                else:
+                    _start_words = ()
 
     def tuple_to_string(self, string_tuple):
         out_text = ""
@@ -610,15 +615,16 @@ class Poet(MarkovTextGenerator):
             self.create_base()
         self.create_dump()
 
+    def _get_synonyms(self, words_list):
+        for word in words_list:
+            yield word
+            yield from self.synonyms_dictionary.get_synonyms(word)
+
     def write_poem(self, verse="abab", size=(8, 7), meter="10", *start_words):
-        _start_words = []
-        for word in start_words:
-            _start_words.append(word)
-            _start_words.extend(self.synonyms_dictionary.get_synonyms(word))
 
         self.accentuation_dictionary.morpher = MorpherAccentizer()
         try:
-            poem = Poem(self, verse, size, meter, *_start_words)
+            poem = Poem(self, verse, size, meter, *start_words)
             poem.create_poem()
             _poem = poem.poem
             self.poems.append(_poem)
