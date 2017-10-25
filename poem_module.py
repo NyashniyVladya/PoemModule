@@ -188,16 +188,26 @@ class AccentuationCreator(_SessionParent):
         elif sylls == 1:
             syllable_numbers = [1]
         else:
-            syllable_numbers = self._get_accentuation(word)
-            for ind, n in enumerate(syllable_numbers[:]):
-                if n > sylls:
-                    syllable_numbers[ind] = sylls
+            if 'ё' in word:
+                syllable_numbers = [
+                    self._get_syllable_num(self._yo_formatter(word))
+                ]
+            else:
+                syllable_numbers = self._get_accentuation(word)
+                for ind, n in enumerate(syllable_numbers[:]):
+                    if n > sylls:
+                        syllable_numbers[ind] = sylls
 
-            syllable_numbers = sorted(set(syllable_numbers))
+                syllable_numbers = sorted(set(syllable_numbers))
 
         self.database[word] = syllable_numbers
         self.create_dump()
         return syllable_numbers
+
+    def _yo_formatter(self, word):
+        return "".join(
+            map(lambda l: (l.upper() if (l == 'ё') else l), word.lower())
+        )
 
     def _get_syllable_num(self, word):
         """
@@ -348,14 +358,26 @@ class RhymeCreator(_SessionParent):
 
 class Poem(object):
 
+    meters = {
+        "хорей": "10",
+        "ямб": "01",
+        "дактиль": "100",
+        "амфибрахий": "010",
+        "анапест": "001"
+    }
+
     def __init__(
         self,
         poet_object,
-        verse="abab",
-        size=(9, 8),
-        meter="10",
+        verse="AbAb",
+        meter_size=4,
+        meter="ямб",
         *start_words
     ):
+
+        meter = self.meters.get(meter, None)
+        if not meter:
+            meter = self.meters["ямб"]
 
         self.poet = poet_object
         self.verse = verse
@@ -363,32 +385,33 @@ class Poem(object):
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
-        self.sizes = dict(self.__get_size_dict(verse, size, meter))
+        self.sizes = dict(self.__get_size_dict(verse, meter_size, meter))
 
         self.poem = ""
 
+    def get_re_and_size(self, string_name, meter_size, meter_one):
+
+        woman_rhyme = string_name.isupper()
+        final_meter = ""
+        _size_counter = 0
+        ind = 0
+        for ind, part in enumerate(cycle(meter_one)):
+            if part == '1':
+                _size_counter += 1
+            final_meter += part
+            if _size_counter >= meter_size:
+                if woman_rhyme and (final_meter[-2:] == "10"):
+                    break
+                elif (not woman_rhyme) and (final_meter[-1] == '1'):
+                    break
+        ind += 1
+        final_meter = final_meter.replace('1', "[01]")
+        return (ind, re_compile(final_meter))
+
     def __get_size_dict(self, verse, size, meter):
 
-        _set_verse = set(verse)
-        if len(_set_verse) != len(size):
-            raise Exception("Ритм и указание размеров не совпадают.")
-
-        for str_name, str_size in zip(sorted(_set_verse), size):
-            yield (str_name, (str_size, self.get_re_meter(str_size, meter)))
-
-    def get_re_meter(self, size, meter):
-        """
-        Возвращает объект регулярного выражения,
-        соответствующего нужному метру.
-        """
-        final_meter = ""
-        for ind, part in enumerate(cycle(meter)):
-            if ind >= size:
-                break
-            if part == '1':
-                part = "[01]"
-            final_meter += part
-        return re_compile(final_meter)
+        for str_name in set(verse):
+            yield (str_name, self.get_re_and_size(str_name, size, meter))
 
     def is_unique_string(self, string):
         for string_list in self.string_storage.values():
@@ -620,11 +643,17 @@ class Poet(MarkovTextGenerator):
             yield word
             yield from self.synonyms_dictionary.get_synonyms(word)
 
-    def write_poem(self, verse="abab", size=(8, 7), meter="10", *start_words):
+    def write_poem(self, verse="AbAb", size=4, meter="ямб", *start_words):
 
         self.accentuation_dictionary.morpher = MorpherAccentizer()
         try:
-            poem = Poem(self, verse, size, meter, *start_words)
+            poem = Poem(
+                self,
+                verse=verse,
+                meter_size=size,
+                meter=meter,
+                *start_words
+            )
             poem.create_poem()
             _poem = poem.poem
             self.poems.append(_poem)
