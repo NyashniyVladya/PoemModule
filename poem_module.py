@@ -111,12 +111,7 @@ class _SessionParent(Session):
 
     def create_dump(self):
         with open(self.file_database, "w", encoding="utf-8") as js_file:
-            json.dump(
-                self.database,
-                js_file,
-                ensure_ascii=False,
-                indent=4
-            )
+            json.dump(self.database, js_file, ensure_ascii=False)
 
     def load_dump(self):
         with open(self.file_database, "rb") as js_file:
