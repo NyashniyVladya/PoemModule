@@ -642,13 +642,7 @@ class Poet(MarkovTextGenerator):
 
         self.accentuation_dictionary.morpher = MorpherAccentizer()
         try:
-            poem = Poem(
-                self,
-                verse=verse,
-                meter_size=size,
-                meter=meter,
-                *start_words
-            )
+            poem = Poem(self, verse, size, meter, *start_words)
             poem.create_poem()
             _poem = poem.poem
             self.poems.append(_poem)
