@@ -22,7 +22,8 @@ from MarkovTextGenerator.markov_text_generator import (
     MarkovTextGenerator,
     MarkovTextExcept,
     choices,
-    choice
+    choice,
+    randint
 )
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
@@ -277,7 +278,7 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def _get_accentuation(self, word, ask_user=False, everlasting_try_vk=True):
+    def _get_accentuation(self, word, ask_user=True, everlasting_try_vk=True):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
@@ -376,7 +377,7 @@ class Poem(object):
 
         self.poet = poet_object
         self.verse = verse
-        self.start_words = list(start_words)
+        self.start_words = set(start_words)
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
@@ -418,7 +419,7 @@ class Poem(object):
 
         try_counter = 0
         string_size, string_meter = self.sizes[key]
-        _start_words = tuple(self.poet._get_synonyms(self.start_words))
+        _start_words = frozenset(self.poet._get_synonyms(self.start_words))
 
         while True:
             try_counter += 1
@@ -473,25 +474,31 @@ class Poem(object):
                     return
 
             if _start_words:
-                _hundred = try_counter / 100
-                if _hundred < 10.:
-                    if _hundred.is_integer():
-                        _start_words = tuple(
-                            self.poet._get_synonyms(_start_words)
-                        )
-                else:
-                    _start_words = ()
+                if not (try_counter % 3):
+                    _start_words = frozenset(
+                        self.poet._get_synonyms(_start_words)
+                    )
 
-    def tuple_to_string(self, string_tuple):
+                elif try_counter > 15:
+                    _start_words = frozenset()
+
+    @staticmethod
+    def tuple_to_string(string_tuple):
         out_text = ""
+        _need_capialize = True
         for token in reversed(string_tuple):
             if (token in "$^") or token.isdigit():
+                if token in "$^":
+                    _need_capialize = True
                 continue
             if self.poet.ONLY_WORDS.search(token):
                 out_text += " "
+            if _need_capialize:
+                _need_capialize = False
+                token = token.title()
             out_text += token
 
-        return out_text.strip().capitalize()
+        return out_text.strip()
 
     def create_poem(self):
         self.poem = ""
@@ -542,7 +549,7 @@ class Poet(MarkovTextGenerator):
     def get_rhyme_words(self, string_tuple):
 
         for s in string_tuple:
-            if not self.rhyme_dictionary.is_rus_word(s):
+            if not s.isalpha():
                 continue
             rhyme = self.rhyme_dictionary.get_rhyme(s)
             if rhyme:
@@ -635,8 +642,19 @@ class Poet(MarkovTextGenerator):
 
     def _get_synonyms(self, words_list):
         for word in words_list:
-            yield word
+            yield word.strip().lower()
             yield from self.synonyms_dictionary.get_synonyms(word)
+
+    def write_prose(self, size=3, *start_words):
+
+        try:
+            return Poem.tuple_to_string(
+                tuple(self._get_generate_tokens(*start_words, size=size))
+            )
+        except Exception as ex:
+            if not start_words:
+                raise ex
+            return self.write_prose(size=size)
 
     def write_poem(self, verse="AbAb", size=4, meter="ямб", *start_words):
 
