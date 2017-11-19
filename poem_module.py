@@ -491,7 +491,7 @@ class Poem(object):
                 if token in "$^":
                     _need_capialize = True
                 continue
-            if self.poet.ONLY_WORDS.search(token):
+            if Poet.ONLY_WORDS.search(token):
                 out_text += " "
             if _need_capialize:
                 _need_capialize = False
