@@ -11,8 +11,11 @@ from requests import Session
 from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
-from time import sleep
 from itertools import count
+from time import (
+    sleep,
+    time
+)
 from os.path import (
     abspath,
     isfile,
@@ -22,8 +25,7 @@ from MarkovTextGenerator.markov_text_generator import (
     MarkovTextGenerator,
     MarkovTextExcept,
     choices,
-    choice,
-    randint
+    choice
 )
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
@@ -34,6 +36,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 class NotVariantExcept(Exception):
     pass
 
+
+class WaitExcept(Exception):
+    pass
 
 class MorpherAccentizer(Chrome):
 
@@ -368,6 +373,7 @@ class Poem(object):
         verse="AbAb",
         meter_size=4,
         meter="ямб",
+        time_to_write=0,
         *start_words
     ):
 
@@ -384,6 +390,8 @@ class Poem(object):
         self.sizes = dict(self.__get_size_dict(verse, meter_size, meter))
 
         self.poem = ""
+
+        self.time_to_write = int(time_to_write)
 
     def get_re_and_size(self, string_name, meter_size, meter_one):
 
@@ -417,11 +425,20 @@ class Poem(object):
 
     def set_rhyme_construct(self, key):
 
+
+        if self.time_to_write > 0:
+            _start_time = time()
+
         try_counter = 0
         string_size, string_meter = self.sizes[key]
         _start_words = frozenset(self.poet._get_synonyms(self.start_words))
 
         while True:
+
+            if (self.time_to_write > 0) and _start_time:
+                if time() >= (_start_time + self.time_to_write):
+                    raise WaitExcept("Вышло время на написание строфы.")
+
             try_counter += 1
             need_rhymes = ()
             _loop_counter = 0
@@ -656,11 +673,26 @@ class Poet(MarkovTextGenerator):
                 raise ex
             return self.write_prose(size=size)
 
-    def write_poem(self, verse="AbAb", size=4, meter="ямб", *start_words):
+    def write_poem(
+        self,
+        verse="AbAb",
+        size=4,
+        meter="ямб",
+        time_to_write=0,
+        *start_words,
+        **kwargs
+    ):
 
         self.accentuation_dictionary.morpher = MorpherAccentizer()
         try:
-            poem = Poem(self, verse, size, meter, *start_words)
+            poem = Poem(
+                self,
+                verse,
+                size,
+                meter,
+                time_to_write,
+                *start_words
+            )
             poem.create_poem()
             _poem = poem.poem
             self.poems.append(_poem)
