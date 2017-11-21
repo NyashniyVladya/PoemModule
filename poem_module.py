@@ -283,7 +283,7 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def _get_accentuation(self, word, ask_user=True, everlasting_try_vk=True):
+    def _get_accentuation(self, word, ask_user=False, everlasting_try_vk=True):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
@@ -399,7 +399,7 @@ class Poem(object):
         final_meter = ""
         _size_counter = 0
         ind = 0
-        for ind, part in enumerate(cycle(meter_one)):
+        for ind, part in enumerate(cycle(meter_one), 1):
             if part == '1':
                 _size_counter += 1
             final_meter += part
@@ -408,7 +408,6 @@ class Poem(object):
                     break
                 elif (not woman_rhyme) and (final_meter[-1] == '1'):
                     break
-        ind += 1
         final_meter = final_meter.replace('1', "[01]")
         return (ind, re_compile(final_meter))
 
@@ -450,6 +449,7 @@ class Poem(object):
                 )
             )
             while True:
+                sleep(.01)
                 _loop_counter += 1
                 if _loop_counter > 10:
                     break
