@@ -40,6 +40,7 @@ class NotVariantExcept(Exception):
 class WaitExcept(Exception):
     pass
 
+
 class MorpherAccentizer(Chrome):
 
     URL = "http://morpher.ru/accentizer"
@@ -424,7 +425,6 @@ class Poem(object):
 
     def set_rhyme_construct(self, key):
 
-
         if self.time_to_write > 0:
             _start_time = time()
 
@@ -449,7 +449,7 @@ class Poem(object):
                 )
             )
             while True:
-                sleep(.01)
+                sleep(.05)
                 _loop_counter += 1
                 if _loop_counter > 10:
                     break
@@ -662,7 +662,7 @@ class Poet(MarkovTextGenerator):
             yield word.strip().lower()
             yield from self.synonyms_dictionary.get_synonyms(word)
 
-    def write_prose(self, size=3, *start_words):
+    def write_prose(self, size=None, *start_words):
 
         try:
             return Poem.tuple_to_string(
