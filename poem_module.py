@@ -284,7 +284,7 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def _get_accentuation(self, word, ask_user=False, everlasting_try_vk=True):
+    def _get_accentuation(self, word, ask_user=True, everlasting_try_vk=True):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
@@ -323,7 +323,7 @@ class AccentuationCreator(_SessionParent):
 
 class RhymeCreator(_SessionParent):
 
-    URL = "http://rifme.net/r/"
+    URL = "https://rifmus.net/rifma/"
     RUS = tuple(map(chr, range(1072, 1106)))
 
     def __init__(self):
@@ -347,15 +347,26 @@ class RhymeCreator(_SessionParent):
 
     def __get_rhymes_from_network(self, word):
         _url = parse.urljoin(self.URL, parse.quote(word))
-        req = self.get(_url)
-        assert (req.status_code == 200)
-        page = BeautifulSoup(req.text, "lxml")
-        wordsElement = page.findChild(attrs={"class": "rifmypodryad"})
-        if wordsElement:
-            for element in wordsElement.findAll("li"):
-                rhyme = element.getText().lower().strip()
-                if self.is_rus_word(rhyme):
-                    yield rhyme
+        while True:
+            sleep(.5)
+            print("Запрос рифмы к слову {0!r}.".format(word))
+            req = self.get(_url)
+            if req.status_code in (200, 404):
+                break
+            print(
+                "Ошибка запроса. Код {0}.\r\n{1!r}".format(
+                    req.status_code,
+                    req.text
+                )
+            )
+        if req.status_code == 200:
+            page = BeautifulSoup(req.text, "lxml")
+            wordsElement = page.findChild(attrs={"class": "multicolumn"})
+            if wordsElement:
+                for element in wordsElement.findAll("li"):
+                    rhyme = element.getText().lower().strip()
+                    if self.is_rus_word(rhyme):
+                        yield rhyme
 
 
 class Poem(object):
@@ -449,7 +460,6 @@ class Poem(object):
                 )
             )
             while True:
-                sleep(.05)
                 _loop_counter += 1
                 if _loop_counter > 10:
                     break
@@ -459,12 +469,6 @@ class Poem(object):
                     string = tuple(self.poet._get_generate_tokens(*rhymes))
                 except NotVariantExcept:
                     break
-
-                if not string_size:
-                    string_size = self.poet._syll_calculate_in_tuple(string)
-                    if string_size not in range(5, 11):
-                        string_size = 0
-                        continue
 
                 if not self.is_unique_string(string):
                     continue
