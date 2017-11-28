@@ -8,6 +8,7 @@
 import json
 from urllib import parse
 from requests import Session
+from threading import Lock
 from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
@@ -159,6 +160,51 @@ class SynonymsCreator(_SessionParent):
         return words
 
 
+class UserFeedback(object):
+
+    """
+    Класс, для взамодействия с пользователем.
+    """
+
+    def __init__(self, poet_module):
+
+        self.poet_module = poet_module
+        self.question = self.answer = None
+        self.__lock = Lock()
+
+        self.use_module = self.__get_module_switcher(True)
+
+    def __get_module_switcher(self, use_module=True):
+        if use_module:
+            if self.poet_module.vk_object:
+                if self.poet_module.vk_object.poem_module_testers:
+                    return True
+        return False
+
+    def ask_to_vk(self, question_text):
+        with self.__lock:
+            if not self.use_module:
+                return ""
+            self.question = (
+                self.poet_module.vk_object._feedback_text_title + question_text
+            )
+            self.answer = None
+            _user_for_question = choice(
+                self.poet_module.vk_object.poem_module_testers
+            )
+            self.poet_module.vk_object.sent(
+                target=_user_for_question,
+                text=self.question
+            )
+            print("Ожидание ответа...")
+            while not self.answer:
+                sleep(1.)
+            print("Ответ {0!r} получен.".format(self.answer))
+            _answer = self.answer
+            self.question = self.answer = None
+            return _answer
+
+
 class AccentuationCreator(_SessionParent):
 
     URL = "http://где-ударение.рф/в-слове-{0}"
@@ -167,9 +213,6 @@ class AccentuationCreator(_SessionParent):
         super().__init__("accentuations")
 
         self.poet_module = poet_module
-
-        self.question = None
-        self.answer = None
 
         self.morpher = None
 
@@ -223,49 +266,21 @@ class AccentuationCreator(_SessionParent):
                     return syllable
         return syllable
 
-    def ask_to_vk(self, question_text):
-        if not self.poet_module.vk_object:
-            return
-        self.question = (
-            self.poet_module.vk_object._feedback_text_title + question_text
-        )
-        self.answer = None
-        _user_for_question = choice(
-            self.poet_module.vk_object.poem_module_testers
-        )
-        self.poet_module.vk_object.sent(
-            target=_user_for_question,
-            text=self.question
-        )
-        print("Ожидание ответа...")
-        while not self.answer:
-            sleep(1.)
-        print("Ответ {0!r} получен.".format(self.answer))
-        _answer = self.answer
-        self.question = self.answer = None
-        return _answer
-
-    def ask_for_user(self, word, use_vk=True):
+    def ask_for_user(self, word):
         """
         Спрашивает про ударение у пользователя,
         на случай, если в сети информации нет.
         """
-        if use_vk:
-            use_vk = bool(self.poet_module.vk_object)
 
-        qu = (
-            "[стихомодуль]\n"
-            "Где ударение в слове {0!r}?\n"
-            "(Ответ - номера слогов, цифрой, через запятую)\n"
+        question = (
+            "[стихомодуль]\r\n"
+            "Где ударение в слове {0!r}?\r\n"
+            "(Ответ - номера слогов, цифрой, через запятую)\r\n"
         ).format(word)
 
-        an = None
-        if use_vk:
-            an = self.ask_to_vk(qu)
-        if not an:
-            an = input(qu)
+        answer = self.poet_module.user_feedback.ask_to_vk(question)
 
-        for part in an.split(","):
+        for part in answer.split(","):
             part = part.strip()
             if not part:
                 continue
@@ -284,13 +299,12 @@ class AccentuationCreator(_SessionParent):
                 if word:
                     yield self._get_syllable_num(word)
 
-    def _get_accentuation(self, word, ask_user=True, everlasting_try_vk=True):
+    def _get_accentuation(self, word):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
         Возвращает список чисел.
 
-        :ask_user: Если True, будет спрашивать пользователя, в случае неудачи.
         """
         _url = self.URL.format(word)
         req = self.get(_url)
@@ -305,20 +319,13 @@ class AccentuationCreator(_SessionParent):
             if words:
                 return list(map(self._get_syllable_num, words))
 
-        if not ask_user:
+        if not self.poet_module.user_feedback.use_module:
             raise NotVariantExcept("Ударение в сети не найдено.")
 
         while True:
             accs = list(self.ask_for_user(word))
             if accs:
                 return accs
-            if not everlasting_try_vk:
-                break
-
-        accs = list(self.ask_for_user(word, False))
-        if not accs:
-            raise NotVariantExcept("Ударение не определено.")
-        return accs
 
 
 class RhymeCreator(_SessionParent):
@@ -334,18 +341,33 @@ class RhymeCreator(_SessionParent):
             return False
         return all(map(lambda s: (s.lower() in self.RUS), word))
 
-    def get_rhyme(self, word):
+    def get_rhymes(self, word):
         word = word.lower().strip()
         rhymes = self.database.get(word, None)
         if rhymes is not None:
             return rhymes
         rhymes = self.database[word] = list(
-            self.__get_rhymes_from_network(word)
+            self.__get_rhymes(word)
         )
         self.create_dump()
         return rhymes
 
-    def __get_rhymes_from_network(self, word):
+    def ask_for_user(self, word):
+
+        question = (
+            "[стихомодуль]\r\n"
+            "Какие рифмы у слова {0!r}?\r\n"
+            "(Ответ - рифмующиеся слова, через запятую)\r\n"
+        ).format(word)
+
+        answer = self.poet_module.user_feedback.ask_to_vk(question)
+
+        for part in answer.split(","):
+            part = part.lower().strip()
+            if self.is_rus_word(part):
+                yield part
+
+    def __get_rhymes(self, word):
         _url = parse.urljoin(self.URL, parse.quote(word))
         while True:
             sleep(.5)
@@ -367,6 +389,13 @@ class RhymeCreator(_SessionParent):
                     rhyme = element.getText().lower().strip()
                     if self.is_rus_word(rhyme):
                         yield rhyme
+
+        elif self.poet_module.user_feedback.use_module:
+            while True:
+                accs = list(self.ask_for_user(word))
+                if accs:
+                    yield from accs
+                    break
 
 
 class Poem(object):
@@ -542,6 +571,7 @@ class Poet(MarkovTextGenerator):
         self.rhyme_dictionary = RhymeCreator()
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
+        self.user_feedback = UserFeedback(poet_module=self)
         self.poems = []
         self.vocabulars_in_tokens = []
 
@@ -572,7 +602,7 @@ class Poet(MarkovTextGenerator):
         for s in string_tuple:
             if not s.isalpha():
                 continue
-            rhyme = self.rhyme_dictionary.get_rhyme(s)
+            rhyme = self.rhyme_dictionary.get_rhymes(s)
             if rhyme:
                 return rhyme
             return []
