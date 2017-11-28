@@ -333,8 +333,9 @@ class RhymeCreator(_SessionParent):
     URL = "https://rifmus.net/rifma/"
     RUS = tuple(map(chr, range(1072, 1106)))
 
-    def __init__(self):
+    def __init__(self, poet_module):
         super().__init__("rhymes")
+        self.poet_module = poet_module
 
     def is_rus_word(self, word):
         if not word:
@@ -568,7 +569,7 @@ class Poet(MarkovTextGenerator):
     def __init__(self, *ar, **kw):
         super().__init__(*ar, **kw)
 
-        self.rhyme_dictionary = RhymeCreator()
+        self.rhyme_dictionary = RhymeCreator(poet_module=self)
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
         self.user_feedback = UserFeedback(poet_module=self)
