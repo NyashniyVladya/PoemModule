@@ -548,11 +548,14 @@ class Poem(object):
                 )
             )
             while True:
-                _loop_counter += 1
+
+                rhymes = need_rhymes or _start_words
+                if rhymes:
+                    _loop_counter += 1
+
                 if _loop_counter > 10:
                     break
 
-                rhymes = need_rhymes or _start_words
                 try:
                     string = tuple(self.poet._get_generate_tokens(*rhymes))
                 except NotVariantExcept:
