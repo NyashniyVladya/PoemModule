@@ -89,7 +89,7 @@ class BrowserClass(Chrome):
         result = result.text.strip().lower()
 
         for wrd in self.spaces.split(result):
-            if wrd:
+            if self.poet_module.rhyme_dictionary.is_rus_word(wrd):
                 yield wrd
 
     def format_word(self, word):
