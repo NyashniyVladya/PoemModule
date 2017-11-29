@@ -32,6 +32,7 @@ from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.wait import TimeoutException
 
 
 class NotVariantExcept(Exception):
@@ -64,7 +65,7 @@ class BrowserClass(Chrome):
     def __init__(self, poet_module, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.poet_module = poet_module
-        self.__wait_object = WebDriverWait(self, 300)
+        self.__wait_object = WebDriverWait(self, 60)
 
         if self.poet_module.browser is not self:
             self.poet_module.browser = self
@@ -73,24 +74,30 @@ class BrowserClass(Chrome):
         """
         Ищет рифмы на сайте, с указанием ударения.
         """
-        letNum = self.poet_module.accentuation_dictionary._get_acc_letter(word)
+        try:
+            letNum = (
+                self.poet_module.accentuation_dictionary._get_acc_letter(word)
+            )
 
-        _url = parse.urljoin(self.rifmusURL, parse.quote(word))
-        self.get(_url)
+            _url = parse.urljoin(self.rifmusURL, parse.quote(word))
+            self.get(_url)
 
-        elem_name = self.rifmusLetterCSS.format(letNum)
-        letter = self._wait_element(elem_name, By.CSS_SELECTOR)
-        letter.click()
+            elem_name = self.rifmusLetterCSS.format(letNum)
+            letter = self._wait_element(elem_name, By.CSS_SELECTOR)
+            letter.click()
 
-        button = self._wait_element(self.rifmusButtonCSS, By.CSS_SELECTOR)
-        button.click()
+            button = self._wait_element(self.rifmusButtonCSS, By.CSS_SELECTOR)
+            button.click()
 
-        result = self._wait_element(self.rifmusResult, By.CSS_SELECTOR)
-        result = result.text.strip().lower()
+            result = self._wait_element(self.rifmusResult, By.CSS_SELECTOR)
+            result = result.text.strip().lower()
 
-        for wrd in self.spaces.split(result):
-            if self.poet_module.rhyme_dictionary.is_rus_word(wrd):
-                yield wrd
+            for wrd in self.spaces.split(result):
+                if self.poet_module.rhyme_dictionary.is_rus_word(wrd):
+                    yield wrd
+
+        except TimeoutException:
+            pass
 
     def format_word(self, word):
         """
@@ -112,21 +119,23 @@ class BrowserClass(Chrome):
         """
         Ищет ударение на сайте. Возвращает либо кортеж вариантов, либо None.
         """
+        try:
+            self.get(self.MorpherURL)
+            area = self._wait_element(self.MorpherTextAreaID)
+            button = self._wait_element(self.morpherButtonID)
 
-        self.get(self.MorpherURL)
-        area = self._wait_element(self.MorpherTextAreaID)
-        button = self._wait_element(self.morpherButtonID)
+            area.clear()
+            area.send_keys(word.strip().lower())
+            button.click()
 
-        area.clear()
-        area.send_keys(word.strip().lower())
-        button.click()
+            new_area = self._wait_element(self.MorpherTextAreaID)
 
-        new_area = self._wait_element(self.MorpherTextAreaID)
-
-        result = tuple(
-            filter(bool, map(self.format_word, new_area.text.split(chr(124))))
-        )
-        return (result or None)
+            result = tuple(
+                filter(bool, map(self.format_word, new_area.text.split(chr(124))))
+            )
+            return (result or None)
+        except TimeoutException:
+            return None
 
     def _wait_element(self, element, elem_type=By.ID):
         """
@@ -687,7 +696,6 @@ class Poet(MarkovTextGenerator):
                 if let.lower() in self.vowels:
                     _syllables += 1
                     result += str(int(bool((_syllables in accentuations))))
-        print(result)
         return result
 
     def _syll_calculate_in_tuple(self, string):
