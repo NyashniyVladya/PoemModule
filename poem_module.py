@@ -42,16 +42,55 @@ class WaitExcept(Exception):
     pass
 
 
-class MorpherAccentizer(Chrome):
+class BrowserClass(Chrome):
 
-    URL = "http://morpher.ru/accentizer"
-    textAreaName = "ctl00$ctl00$BodyPlaceHolder$ContentPlaceHolder1$TextBox1"
-    buttonName = "ctl00$ctl00$BodyPlaceHolder$ContentPlaceHolder1$SubmitButton"
+    spaces = re_compile("\s+")
 
-    def __init__(self, *args, **kwargs):
+    MorpherURL = "http://morpher.ru/accentizer"
+    MorpherTextAreaID = (
+        "ctl00_ctl00_BodyPlaceHolder_ContentPlaceHolder1_TextBox1"
+    )
+    morpherButtonID = (
+        "ctl00_ctl00_BodyPlaceHolder_ContentPlaceHolder1_SubmitButton"
+    )
+
+    rifmusURL = "https://rifmus.net/custom/"
+    rifmusLetterCSS = (
+        "#stressform > table > tbody > tr > td:nth-child({0}) > label"
+    )
+    rifmusButtonCSS = "#ssub"
+    rifmusResult = "#result > div:nth-child(3)"
+
+    def __init__(self, poet_module, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.poet_module = poet_module
         self.__wait_object = WebDriverWait(self, 300)
-        self.get(self.URL)
+
+        if self.poet_module.browser is not self:
+            self.poet_module.browser = self
+
+    def _get_rhymes(self, word):
+        """
+        Ищет рифмы на сайте, с указанием ударения.
+        """
+        letNum = self.poet_module.accentuation_dictionary._get_acc_letter(word)
+
+        _url = parse.urljoin(self.rifmusURL, parse.quote(word))
+        self.get(_url)
+
+        elem_name = self.rifmusLetterCSS.format(letNum)
+        letter = self._wait_element(elem_name, By.CSS_SELECTOR)
+        letter.click()
+
+        button = self._wait_element(self.rifmusButtonCSS, By.CSS_SELECTOR)
+        button.click()
+
+        result = self._wait_element(self.rifmusResult, By.CSS_SELECTOR)
+        result = result.text.strip().lower()
+
+        for wrd in self.spaces.split(result):
+            if wrd:
+                yield wrd
 
     def format_word(self, word):
         """
@@ -74,30 +113,76 @@ class MorpherAccentizer(Chrome):
         Ищет ударение на сайте. Возвращает либо кортеж вариантов, либо None.
         """
 
-        area = self._wait_element(self.textAreaName)
-        button = self._wait_element(self.buttonName)
+        self.get(self.MorpherURL)
+        area = self._wait_element(self.MorpherTextAreaID)
+        button = self._wait_element(self.morpherButtonID)
 
         area.clear()
         area.send_keys(word.strip().lower())
         button.click()
 
-        new_area = self._wait_element(self.textAreaName)
+        new_area = self._wait_element(self.MorpherTextAreaID)
 
         result = tuple(
             filter(bool, map(self.format_word, new_area.text.split(chr(124))))
         )
         return (result or None)
 
-    def _wait_element(self, element_name):
+    def _wait_element(self, element, elem_type=By.ID):
         """
-        Ожидает загрузки элемента, указанного в statement, и возвращает его.
+        Ожидает загрузки элемента, указанного в element_id, и возвращает его.
         """
         return self.__wait_object.until(
             expected_conditions.visibility_of_element_located(
-                (By.NAME, element_name)
+                (elem_type, element)
             ),
-            "Превышено время ожидания элемента {0!r}.".format(element_name)
+            "Превышено время ожидания элемента {0!r}.".format(element)
         )
+
+
+class UserFeedback(object):
+
+    """
+    Класс, для взамодействия с пользователем.
+    """
+
+    def __init__(self, poet_module):
+
+        self.poet_module = poet_module
+        self.question = self.answer = None
+        self.__lock = Lock()
+
+        self.use_module = self.__get_module_switcher(True)
+
+    def __get_module_switcher(self, use_module=True):
+        if use_module:
+            if self.poet_module.vk_object:
+                if self.poet_module.vk_object.poem_module_testers:
+                    return True
+        return False
+
+    def ask_to_vk(self, question_text):
+        with self.__lock:
+            if not self.use_module:
+                return ""
+            self.question = (
+                self.poet_module.vk_object._feedback_text_title + question_text
+            )
+            self.answer = None
+            _user_for_question = choice(
+                self.poet_module.vk_object.poem_module_testers
+            )
+            self.poet_module.vk_object.sent(
+                target=_user_for_question,
+                text=self.question
+            )
+            print("Ожидание ответа...")
+            while not self.answer:
+                sleep(1.)
+            print("Ответ {0!r} получен.".format(self.answer))
+            _answer = self.answer
+            self.question = self.answer = None
+            return _answer
 
 
 class _SessionParent(Session):
@@ -160,51 +245,6 @@ class SynonymsCreator(_SessionParent):
         return words
 
 
-class UserFeedback(object):
-
-    """
-    Класс, для взамодействия с пользователем.
-    """
-
-    def __init__(self, poet_module):
-
-        self.poet_module = poet_module
-        self.question = self.answer = None
-        self.__lock = Lock()
-
-        self.use_module = self.__get_module_switcher(True)
-
-    def __get_module_switcher(self, use_module=True):
-        if use_module:
-            if self.poet_module.vk_object:
-                if self.poet_module.vk_object.poem_module_testers:
-                    return True
-        return False
-
-    def ask_to_vk(self, question_text):
-        with self.__lock:
-            if not self.use_module:
-                return ""
-            self.question = (
-                self.poet_module.vk_object._feedback_text_title + question_text
-            )
-            self.answer = None
-            _user_for_question = choice(
-                self.poet_module.vk_object.poem_module_testers
-            )
-            self.poet_module.vk_object.sent(
-                target=_user_for_question,
-                text=self.question
-            )
-            print("Ожидание ответа...")
-            while not self.answer:
-                sleep(1.)
-            print("Ответ {0!r} получен.".format(self.answer))
-            _answer = self.answer
-            self.question = self.answer = None
-            return _answer
-
-
 class AccentuationCreator(_SessionParent):
 
     URL = "http://где-ударение.рф/в-слове-{0}"
@@ -213,8 +253,6 @@ class AccentuationCreator(_SessionParent):
         super().__init__("accentuations")
 
         self.poet_module = poet_module
-
-        self.morpher = None
 
     def get_acc(self, word):
         """
@@ -248,6 +286,20 @@ class AccentuationCreator(_SessionParent):
         self.database[word] = syllable_numbers
         self.create_dump()
         return syllable_numbers
+
+    def _get_acc_letter(self, word):
+        """
+        Возвращает номер ударной БУКВЫ. Для поиска рифмы на сайте.
+        """
+        word = word.lower().strip()
+        syllable = 0
+        syllable_numbers = self.get_acc(word)
+        for ind, let in enumerate(word, 1):
+            if let in self.poet_module.vowels:
+                syllable += 1
+            if syllable in syllable_numbers:
+                return ind
+        raise NotVariantExcept("Ударение не определено.")
 
     def _yo_formatter(self, word):
         return "".join(
@@ -314,8 +366,8 @@ class AccentuationCreator(_SessionParent):
             if accs:
                 return accs
 
-        if self.morpher:
-            words = self.morpher.get_acc(word)
+        if self.poet_module.browser:
+            words = self.poet_module.browser.get_acc(word)
             if words:
                 return list(map(self._get_syllable_num, words))
 
@@ -369,34 +421,39 @@ class RhymeCreator(_SessionParent):
                 yield part
 
     def __get_rhymes(self, word):
-        _url = parse.urljoin(self.URL, parse.quote(word))
-        while True:
-            sleep(.5)
-            print("Запрос рифмы к слову {0!r}.".format(word))
-            req = self.get(_url)
-            if req.status_code in (200, 404):
-                break
-            print(
-                "Ошибка запроса. Код {0}.\r\n{1!r}".format(
-                    req.status_code,
-                    req.text
-                )
-            )
-        if req.status_code == 200:
-            page = BeautifulSoup(req.text, "lxml")
-            wordsElement = page.findChild(attrs={"class": "multicolumn"})
-            if wordsElement:
-                for element in wordsElement.findAll("li"):
-                    rhyme = element.getText().lower().strip()
-                    if self.is_rus_word(rhyme):
-                        yield rhyme
 
-        elif self.poet_module.user_feedback.use_module:
+        if self.poet_module.browser:
+            yield from self.poet_module.browser._get_rhymes(word)
+
+        else:
+            _url = parse.urljoin(self.URL, parse.quote(word))
             while True:
-                accs = list(self.ask_for_user(word))
-                if accs:
-                    yield from accs
+                sleep(.5)
+                print("Запрос рифмы к слову {0!r}.".format(word))
+                req = self.get(_url)
+                if req.status_code in (200, 404):
                     break
+                print(
+                    "Ошибка запроса. Код {0}.\r\n{1!r}".format(
+                        req.status_code,
+                        req.text
+                    )
+                )
+            if req.status_code == 200:
+                page = BeautifulSoup(req.text, "lxml")
+                wordsElement = page.findChild(attrs={"class": "multicolumn"})
+                if wordsElement:
+                    for element in wordsElement.findAll("li"):
+                        rhyme = element.getText().lower().strip()
+                        if self.is_rus_word(rhyme):
+                            yield rhyme
+
+            elif self.poet_module.user_feedback.use_module:
+                while True:
+                    accs = list(self.ask_for_user(word))
+                    if accs:
+                        yield from accs
+                        break
 
 
 class Poem(object):
@@ -472,6 +529,7 @@ class Poem(object):
         try_counter = 0
         string_size, string_meter = self.sizes[key]
         _start_words = frozenset(self.poet._get_synonyms(self.start_words))
+        _string_len = self.verse.count(key)
 
         while True:
 
@@ -480,7 +538,7 @@ class Poem(object):
                     raise WaitExcept("Вышло время на написание строфы.")
 
             try_counter += 1
-            need_rhymes = ()
+            need_rhymes = _need_rhymes = ()
             _loop_counter = 0
             self.string_storage[key] = []
             print(
@@ -505,10 +563,6 @@ class Poem(object):
                 if self.poet._syll_calculate_in_tuple(string) != string_size:
                     continue
 
-                _need_rhymes = self.poet.get_rhyme_words(string)
-                if not _need_rhymes:
-                    continue
-
                 try:
                     _temp_string_meter = self.poet.get_string_meter(string)
                 except NotVariantExcept:
@@ -517,11 +571,19 @@ class Poem(object):
                 if not string_meter.search(_temp_string_meter):
                     continue
 
-                need_rhymes = _need_rhymes
+                if (len(self.string_storage[key]) + 1) < _string_len:
+                    try:
+                        _need_rhymes = self.poet.get_rhyme_words(string)
+                    except NotVariantExcept:
+                        continue
+                    if not _need_rhymes:
+                        continue
+
+                    need_rhymes = _need_rhymes
 
                 _loop_counter = 0
                 self.string_storage[key].append(string)
-                if len(self.string_storage[key]) >= self.verse.count(key):
+                if len(self.string_storage[key]) >= _string_len:
                     return
 
             if _start_words:
@@ -573,6 +635,7 @@ class Poet(MarkovTextGenerator):
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
         self.user_feedback = UserFeedback(poet_module=self)
+        self.browser = None
         self.poems = []
         self.vocabulars_in_tokens = []
 
@@ -603,10 +666,7 @@ class Poet(MarkovTextGenerator):
         for s in string_tuple:
             if not s.isalpha():
                 continue
-            rhyme = self.rhyme_dictionary.get_rhymes(s)
-            if rhyme:
-                return rhyme
-            return []
+            return self.rhyme_dictionary.get_rhymes(s)
         return []
 
     def get_string_meter(self, string_typle):
@@ -718,7 +778,7 @@ class Poet(MarkovTextGenerator):
         **kwargs
     ):
 
-        self.accentuation_dictionary.morpher = MorpherAccentizer()
+        self.browser = BrowserClass(poet_module=self)
         try:
             poem = Poem(
                 self,
@@ -734,8 +794,8 @@ class Poet(MarkovTextGenerator):
             self.create_dump()
             return _poem
         finally:
-            self.accentuation_dictionary.morpher.quit()
-            self.accentuation_dictionary.morpher = None
+            self.browser.quit()
+            self.browser = None
 
     def add_vocabulary(self, peer_id, from_dialogue=None, update=False):
         vocabular_name = "{0}_{1}".format(peer_id, from_dialogue)
