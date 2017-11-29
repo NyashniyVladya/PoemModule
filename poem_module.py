@@ -331,7 +331,7 @@ class AccentuationCreator(_SessionParent):
 class RhymeCreator(_SessionParent):
 
     URL = "https://rifmus.net/rifma/"
-    RUS = tuple(map(chr, range(1072, 1106)))
+    RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
 
     def __init__(self, poet_module):
         super().__init__("rhymes")
