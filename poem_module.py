@@ -34,6 +34,9 @@ from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support.wait import TimeoutException
 
+__author__ = "Vladya"
+__version__ = "1.1.0"
+
 
 class NotVariantExcept(Exception):
     pass
