@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
-from MarkovPoemModule import poem_module
+import MarkovPoemModule
 
 setup(
     name="MarkovPoemModule",
-    version=poem_module.__version__,
-    author=poem_module.__author__,
+    version=MarkovPoemModule.__version__,
+    author=MarkovPoemModule.__author__,
     url="https://github.com/NyashniyVladya/PoemModule",
     packages=find_packages(),
     python_requires=">=3.6",
