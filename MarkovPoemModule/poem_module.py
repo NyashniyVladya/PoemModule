@@ -13,6 +13,11 @@ from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
 from itertools import count
+from random import (
+    choices,
+    choice,
+    shuffle
+)
 from time import (
     sleep,
     time
@@ -24,9 +29,7 @@ from os.path import (
 )
 from MarkovTextGenerator.markov_text_generator import (
     MarkovTextGenerator,
-    MarkovTextExcept,
-    choices,
-    choice
+    MarkovTextExcept
 )
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
@@ -40,6 +43,14 @@ class NotVariantExcept(Exception):
 
 
 class WaitExcept(Exception):
+    pass
+
+
+class NotRightMeter(Exception):
+    pass
+
+
+class StringIsFull(Exception):
     pass
 
 
@@ -170,7 +181,7 @@ class UserFeedback(object):
         self.question = self.answer = None
         self.__lock = Lock()
 
-        self.use_module = self.__get_module_switcher(True)
+        self.use_module = self.__get_module_switcher(False)
 
     def __get_module_switcher(self, use_module=True):
         if use_module:
@@ -510,13 +521,12 @@ class Poem(object):
 
         self.time_to_write = int(time_to_write)
 
-    def get_re_and_size(self, string_name, meter_size, meter_one):
+    def get_meter_and_re(self, string_name, meter_size, meter_one):
 
         woman_rhyme = string_name.isupper()
         final_meter = ""
         _size_counter = 0
-        ind = 0
-        for ind, part in enumerate(cycle(meter_one), 1):
+        for part in cycle(meter_one):
             if part == '1':
                 _size_counter += 1
             final_meter += part
@@ -525,13 +535,13 @@ class Poem(object):
                     break
                 elif (not woman_rhyme) and (final_meter[-1] == '1'):
                     break
-        final_meter = final_meter.replace('1', "[01]")
-        return (ind, re_compile(final_meter))
+        result_re_object = re_compile(final_meter.replace('1', "[01]"))
+        return (final_meter, result_re_object)
 
     def __get_size_dict(self, verse, size, meter):
 
         for str_name in set(verse):
-            yield (str_name, self.get_re_and_size(str_name, size, meter))
+            yield (str_name, self.get_meter_and_re(str_name, size, meter))
 
     def is_unique_string(self, string):
         for string_list in self.string_storage.values():
@@ -539,13 +549,24 @@ class Poem(object):
                 return False
         return True
 
+    def get_string(self, rhymes, final_meter):
+        try:
+            for token in self.poet._get_generate_tokens(
+                *rhymes,
+                final_meter=final_meter
+            ):
+                yield token
+        except StringIsFull:
+            pass
+
     def set_rhyme_construct(self, key):
 
         if self.time_to_write > 0:
             _start_time = time()
 
         try_counter = 0
-        string_size, string_meter = self.sizes[key]
+        _final_meter, re_string_meter = self.sizes[key]
+        string_size = len(_final_meter)
         _start_words = frozenset(self.poet._get_synonyms(self.start_words))
         _string_len = self.verse.count(key)
 
@@ -575,9 +596,16 @@ class Poem(object):
                     break
 
                 try:
-                    string = tuple(self.poet._get_generate_tokens(*rhymes))
+                    string = tuple(
+                        self.get_string(
+                            rhymes=rhymes,
+                            final_meter=_final_meter
+                        )
+                    )
                 except NotVariantExcept:
                     break
+                except NotRightMeter:
+                    continue
 
                 if not self.is_unique_string(string):
                     continue
@@ -589,7 +617,7 @@ class Poem(object):
                 except NotVariantExcept:
                     continue
 
-                if not string_meter.search(_temp_string_meter):
+                if not re_string_meter.search(_temp_string_meter):
                     continue
 
                 if (len(self.string_storage[key]) + 1) < _string_len:
@@ -690,6 +718,77 @@ class Poet(MarkovTextGenerator):
             return self.rhyme_dictionary.get_rhymes(s)
         return []
 
+    def get_optimal_variant(
+        self,
+        variants,
+        current_string,
+        final_meter
+    ):
+        """
+        Перегрузка дефолтной функции,
+        для выстраивания ритмической конструкции, во время генерации.
+        """
+        _degub = True
+        if _degub:
+            print(current_string)
+        try:
+            meter = self.get_string_meter(current_string)
+        except NotVariantExcept:
+            raise NotRightMeter("Невозможно определить ударение.")
+        if meter:
+            _weiht = self.is_good_meter(meter, final_meter)
+            if not _weiht:
+                raise NotRightMeter("Строка не годится, для продолжения.")
+            elif _weiht == 5:
+                raise StringIsFull("Строка готова.")
+
+        good_variants = []
+        _weights = []
+        if self.user_feedback.use_module:
+            variant_list = list(frozenset(variants))
+            shuffle(variant_list)
+            variant_list = variant_list[100:]
+        else:
+            variant_list = frozenset(variants)
+        for token in variant_list:
+            if token.isdigit():
+                continue
+            if not token.isalpha():
+                good_variants.append(token)
+                _weiht = variants.count(token)
+                _weights.append(_weiht)
+                continue
+            try:
+                _meter = self.get_string_meter((token,)) + meter
+            except NotVariantExcept:
+                continue
+            _weiht = self.is_good_meter(_meter, final_meter)
+            if not _weiht:
+                continue
+            _weiht *= variants.count(token)
+            good_variants.append(token)
+            _weights.append(_weiht)
+        if not good_variants:
+            raise NotRightMeter("Не найдено ни одного пригодного варианта.")
+        return choices(good_variants, weights=_weights, k=1)[0]
+
+    def is_good_meter(self, string_meter, full_meter):
+        """
+        Определяет, годится ли частичный метр, для продолжения генерации.
+        Возвращает "вес" ценности следующего токена.
+        """
+        string_size = len(string_meter)
+        full_size = len(full_meter)
+        if string_size > full_size:
+            return 0
+        string_size *= -1
+        current_re = re_compile(full_meter[string_size:].replace('1', "[01]"))
+        if current_re.search(string_meter):
+            if string_size == full_size:
+                return 5
+            return 2
+        return 0
+
     def get_string_meter(self, string_typle):
         """
         Определяет стихотворный метр строки.
@@ -777,25 +876,13 @@ class Poet(MarkovTextGenerator):
             yield word.strip().lower()
             yield from self.synonyms_dictionary.get_synonyms(word)
 
-    def write_prose(self, size=None, *start_words):
-
-        try:
-            return Poem.tuple_to_string(
-                tuple(self._get_generate_tokens(*start_words, size=size))
-            )
-        except Exception as ex:
-            if not start_words:
-                raise ex
-            return self.write_prose(size=size)
-
     def write_poem(
         self,
         verse="AbAb",
         size=4,
         meter="ямб",
         time_to_write=0,
-        *start_words,
-        **kwargs
+        *start_words
     ):
 
         self.browser = BrowserClass(poet_module=self)
