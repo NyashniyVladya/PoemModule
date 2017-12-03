@@ -181,7 +181,7 @@ class UserFeedback(object):
         self.question = self.answer = None
         self.__lock = Lock()
 
-        self.use_module = self.__get_module_switcher(False)
+        self.use_module = self.__get_module_switcher(True)
 
     def __get_module_switcher(self, use_module=True):
         if use_module:
@@ -553,7 +553,8 @@ class Poem(object):
         try:
             for token in self.poet._get_generate_tokens(
                 *rhymes,
-                final_meter=final_meter
+                final_meter=final_meter,
+                size=-1
             ):
                 yield token
         except StringIsFull:
@@ -677,8 +678,8 @@ class Poet(MarkovTextGenerator):
     vowels = "ауоыиэяюеёaeiouy"
     tokensBase = "poetModuleTokens"
 
-    def __init__(self, *ar, **kw):
-        super().__init__(*ar, **kw)
+    def __init__(self, chain_order=3, **kwargs):
+        super().__init__(chain_order=chain_order, **kwargs)
 
         self.rhyme_dictionary = RhymeCreator(poet_module=self)
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
@@ -710,6 +711,10 @@ class Poet(MarkovTextGenerator):
         self.vocabulars_in_tokens = _dump_data["vocabulars"]
         self.create_base()
 
+    def create_base(self):
+        super().create_base()
+        self.start_arrays = tuple(frozenset(self.get_corrected_start_arrays()))
+
     def get_rhyme_words(self, string_tuple):
 
         for s in string_tuple:
@@ -717,6 +722,27 @@ class Poet(MarkovTextGenerator):
                 continue
             return self.rhyme_dictionary.get_rhymes(s)
         return []
+
+    def token_is_correct(self, token):
+        """
+        Подходит ли токен, для генерации стиха.
+        Допускаются русские слова, знаки препинания и символы начала и конца.
+        """
+        if self.rhyme_dictionary.is_rus_word(token):
+            return True
+        elif self.ONLY_MARKS.search(token):
+            return True
+        elif self.END_TOKENS.search(token):
+            return True
+        elif token in "$^":
+            return True
+        return False
+
+    def get_corrected_start_arrays(self):
+
+        for tokens in self.start_arrays:
+            if all(map(self.token_is_correct, tokens)):
+                yield tokens
 
     def get_optimal_variant(
         self,
@@ -728,46 +754,41 @@ class Poet(MarkovTextGenerator):
         Перегрузка дефолтной функции,
         для выстраивания ритмической конструкции, во время генерации.
         """
-        _degub = True
-        if _degub:
-            print(current_string)
         try:
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
             raise NotRightMeter("Невозможно определить ударение.")
+        print(current_string)
         if meter:
-            _weiht = self.is_good_meter(meter, final_meter)
-            if not _weiht:
+            _weight = self.is_good_meter(meter, final_meter)
+            if not _weight:
                 raise NotRightMeter("Строка не годится, для продолжения.")
-            elif _weiht == 5:
+            elif _weight == 50:
                 raise StringIsFull("Строка готова.")
 
         good_variants = []
         _weights = []
-        if self.user_feedback.use_module:
-            variant_list = list(frozenset(variants))
-            shuffle(variant_list)
-            variant_list = variant_list[100:]
-        else:
-            variant_list = frozenset(variants)
-        for token in variant_list:
-            if token.isdigit():
-                continue
-            if not token.isalpha():
-                good_variants.append(token)
-                _weiht = variants.count(token)
-                _weights.append(_weiht)
+        variants_list = list(frozenset(variants))
+        shuffle(variants_list)
+        var_len = (10 if self.user_feedback.use_module else 100)
+        variants_list = variants_list[:var_len]
+        for token in variants_list:
+            if not self.rhyme_dictionary.is_rus_word(token):
+                if self.token_is_correct(token):
+                    good_variants.append(token)
+                    _weight = variants.count(token)
+                    _weights.append(_weight)
                 continue
             try:
                 _meter = self.get_string_meter((token,)) + meter
             except NotVariantExcept:
                 continue
-            _weiht = self.is_good_meter(_meter, final_meter)
-            if not _weiht:
+            _weight = self.is_good_meter(_meter, final_meter)
+            if not _weight:
                 continue
-            _weiht *= variants.count(token)
+            _weight *= variants.count(token)
             good_variants.append(token)
-            _weights.append(_weiht)
+            _weights.append(_weight)
         if not good_variants:
             raise NotRightMeter("Не найдено ни одного пригодного варианта.")
         return choices(good_variants, weights=_weights, k=1)[0]
@@ -778,14 +799,16 @@ class Poet(MarkovTextGenerator):
         Возвращает "вес" ценности следующего токена.
         """
         string_size = len(string_meter)
+        if not string_size:
+            return 1
         full_size = len(full_meter)
         if string_size > full_size:
             return 0
         string_size *= -1
         current_re = re_compile(full_meter[string_size:].replace('1', "[01]"))
         if current_re.search(string_meter):
-            if string_size == full_size:
-                return 5
+            if abs(string_size) == full_size:
+                return 50
             return 2
         return 0
 
@@ -844,16 +867,18 @@ class Poet(MarkovTextGenerator):
         _variants = []
         _weights = []
         for tokens in self.start_arrays:
-            weight = 0
-            for word in start_words:
-                word = word.strip().lower()
-                for token in self.ONLY_WORDS.finditer(word):
-                    token = token.group()
-                    if token in tokens:
-                        weight += 1
-            if weight:
-                _variants.append(tokens)
-                _weights.append(weight)
+            for tok in tokens:
+                if tok.isalpha():
+                    weight = 0
+                    for word in start_words:
+                        word = word.strip().lower()
+                        for token in self.ONLY_WORDS.finditer(word):
+                            if token.group() == tok:
+                                weight += 1
+                    if weight:
+                        _variants.append(tokens)
+                        _weights.append(weight)
+                    break
 
         if not _variants:
             raise NotVariantExcept("Варианты не найдены.")
