@@ -593,7 +593,7 @@ class Poem(object):
                 if rhymes:
                     _loop_counter += 1
 
-                if _loop_counter > 50:
+                if _loop_counter > 100:
                     break
 
                 try:
@@ -637,12 +637,10 @@ class Poem(object):
                     return
 
             if _start_words:
-                if not (try_counter % 3):
-                    _start_words = frozenset(
-                        self.poet._get_synonyms(_start_words)
-                    )
+                _len_before = len(_start_words)
+                _start_words = frozenset(self.poet._get_synonyms(_start_words))
 
-                elif try_counter > 15:
+                if (_len_before == len(_start_words)) or (try_counter > 5):
                     _start_words = frozenset()
 
     @staticmethod
@@ -758,7 +756,7 @@ class Poet(MarkovTextGenerator):
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
             raise NotRightMeter("Невозможно определить ударение.")
-        print(current_string)
+        print(Poem.tuple_to_string(current_string))
         if meter:
             _weight = self.is_good_meter(meter, final_meter)
             if not _weight:
@@ -771,8 +769,10 @@ class Poet(MarkovTextGenerator):
         variants_list = list(frozenset(variants))
         shuffle(variants_list)
         var_len = (10 if self.user_feedback.use_module else 100)
-        variants_list = variants_list[:var_len]
         for token in variants_list:
+            if len(good_variants) >= var_len:
+                #  Иначе цикл может затянуться на несколько тысяч итераций.
+                break
             if not self.rhyme_dictionary.is_rus_word(token):
                 if self.token_is_correct(token):
                     good_variants.append(token)
