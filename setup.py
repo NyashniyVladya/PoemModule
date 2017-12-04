@@ -14,7 +14,8 @@ setup(
     install_requires=[
         "MarkovTextGenerator>=1.5.8",
         "bs4",
-        "selenium"
+        "selenium",
+        "shutil"
     ],
     keywords=(
         "vladya markovgenerator markov_generator MarkovPoemModule "

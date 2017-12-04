@@ -13,6 +13,11 @@ from bs4 import BeautifulSoup
 from itertools import cycle
 from re import compile as re_compile
 from itertools import count
+from shutil import copy2
+from os import (
+    remove,
+    path
+)
 from random import (
     choices,
     choice,
@@ -120,11 +125,16 @@ class BrowserClass(Chrome):
         Изменяет символ ударения на большую букву, в месте ударения.
         Если ударения нет - возвращает None.
         """
-        if chr(769) not in word:
+        word = word.strip().lower()
+        if 'ё' in word:
+            return self.poet_module.accentuation_dictionary._yo_formatter(word)
+
+        ACCENT = chr(769)
+        if (ACCENT not in word):
             return None
         new_word = []
         for s in word.strip():
-            if s == chr(769):
+            if s == ACCENT:
                 if new_word:
                     new_word[-1] = new_word[-1].upper()
                 continue
@@ -135,6 +145,7 @@ class BrowserClass(Chrome):
         """
         Ищет ударение на сайте. Возвращает либо кортеж вариантов, либо None.
         """
+        SPLITTER = chr(124)
         with self.__browser_lock:
             try:
                 self.get(self.MorpherURL)
@@ -150,7 +161,7 @@ class BrowserClass(Chrome):
                 result = tuple(
                     filter(
                         bool,
-                        map(self.format_word, new_area.text.split(chr(124)))
+                        map(self.format_word, new_area.text.split(SPLITTER))
                     )
                 )
                 return (result or None)
@@ -175,11 +186,13 @@ class UserFeedback(object):
     Класс, для взамодействия с пользователем.
     """
 
-    def __init__(self, poet_module):
+    def __init__(self, poet_module, wait_time=60, try_count=3):
 
         self.poet_module = poet_module
         self.question = self.answer = None
         self.__lock = Lock()
+        self.wait_time = float(wait_time)
+        self.try_count = int(try_count)
 
         self.use_module = self.__get_module_switcher(True)
 
@@ -201,14 +214,24 @@ class UserFeedback(object):
             _user_for_question = choice(
                 self.poet_module.vk_object.poem_module_testers
             )
-            self.poet_module.vk_object.sent(
-                target=_user_for_question,
-                text=self.question
-            )
-            print("Ожидание ответа...")
-            while not self.answer:
+            while True:
+                if self.poet_module.vk_object.sent(
+                    target=_user_for_question,
+                    text=self.question
+                ):
+                    break
                 sleep(1.)
-            print("Ответ {0!r} получен.".format(self.answer))
+
+            print("Ожидание ответа...")
+            _start_wait_time = time()
+            while not self.answer:
+                if (time() - _start_wait_time) >= self.wait_time:
+                    self.answer = ""
+                    print("Время ожидания вышло.")
+                    break
+                sleep(1.)
+            else:
+                print("Ответ {0!r} получен.".format(self.answer))
             _answer = self.answer
             self.question = self.answer = None
             return _answer
@@ -232,8 +255,11 @@ class _SessionParent(Session):
         self.load_dump()
 
     def create_dump(self):
-        with open(self.file_database, "w", encoding="utf-8") as js_file:
+        backup_file = "{0}.backup".format(path.splitext(self.file_database)[0])
+        with open(backup_file, "w", encoding="utf-8") as js_file:
             json.dump(self.database, js_file, ensure_ascii=False)
+        copy2(backup_file, self.file_database)
+        remove(backup_file)
 
     def load_dump(self):
         with open(self.file_database, "rb") as js_file:
@@ -330,7 +356,8 @@ class AccentuationCreator(_SessionParent):
                 return ind
         raise NotVariantExcept("Ударение не определено.")
 
-    def _yo_formatter(self, word):
+    @staticmethod
+    def _yo_formatter(word):
         return "".join(
             map(lambda l: (l.upper() if (l == 'ё') else l), word.lower())
         )
@@ -372,11 +399,12 @@ class AccentuationCreator(_SessionParent):
         """
         Парсит страницу и возвращает номера слогов ударений.
         """
+        SPLITTER = chr(8212)
         acc_rule = answer_page.findChild(attrs={"class": "rule"})
         if acc_rule:
             answer_string = acc_rule.getText().strip()[:-1]
             for part in answer_string.split(","):
-                word = part.split(chr(8212))[-1].strip()
+                word = part.split(SPLITTER)[-1].strip()
                 if word:
                     yield self._get_syllable_num(word)
 
@@ -403,7 +431,11 @@ class AccentuationCreator(_SessionParent):
         if not self.poet_module.user_feedback.use_module:
             raise NotVariantExcept("Ударение в сети не найдено.")
 
+        _counter = 0
         while True:
+            _counter += 1
+            if _counter > self.poet_module.user_feedback.try_count:
+                raise NotVariantExcept("Запросы исчерпаны.")
             accs = list(self.ask_for_user(word))
             if accs:
                 return accs
@@ -478,7 +510,11 @@ class RhymeCreator(_SessionParent):
                             yield rhyme
 
             elif self.poet_module.user_feedback.use_module:
+                _counter = 0
                 while True:
+                    _counter += 1
+                    if _counter > self.poet_module.user_feedback.try_count:
+                        raise NotVariantExcept("Запросы исчерпаны.")
                     accs = list(self.ask_for_user(word))
                     if accs:
                         yield from accs
@@ -505,9 +541,11 @@ class Poem(object):
         *start_words
     ):
 
-        meter = self.meters.get(meter, None)
-        if not meter:
-            meter = self.meters["ямб"]
+        while True:
+            _meter = self.meters.get(meter, None)
+            if _meter:
+                break
+            meter = choice(tuple(self.meters.keys()))
 
         self.poet = poet_object
         self.verse = verse
@@ -515,11 +553,13 @@ class Poem(object):
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
-        self.sizes = dict(self.__get_size_dict(verse, meter_size, meter))
+        self.sizes = dict(self.__get_size_dict(verse, meter_size, _meter))
 
         self.poem = ""
 
         self.time_to_write = int(time_to_write)
+
+        self.__poem_type_tag = "#{0}стопный_{1}".format(meter_size, meter)
 
     def get_meter_and_re(self, string_name, meter_size, meter_one):
 
@@ -593,7 +633,7 @@ class Poem(object):
                 if rhymes:
                     _loop_counter += 1
 
-                if _loop_counter > 100:
+                if _loop_counter > 50:
                     break
 
                 try:
@@ -662,7 +702,8 @@ class Poem(object):
         return out_text.strip()
 
     def create_poem(self):
-        self.poem = ""
+        self.poem = self.__poem_type_tag
+        self.poem += "\r\n\r\n\r\n"
         for key in self.string_storage.copy().keys():
             self.set_rhyme_construct(key)
         for key in self.verse:
@@ -698,8 +739,11 @@ class Poet(MarkovTextGenerator):
             "tokens": self.tokens_array,
             "vocabulars": self.vocabulars_in_tokens
         }
-        with open(self.dump_file, "w", encoding="utf-8") as js_file:
+        backup_file = "{0}.backup".format(path.splitext(self.dump_file)[0])
+        with open(backup_file, "w", encoding="utf-8") as js_file:
             json.dump(_dump_data, js_file, ensure_ascii=False)
+        copy2(backup_file, self.dump_file)
+        remove(backup_file)
 
     def load_dump(self):
         with open(self.dump_file, "rb") as js_file:
@@ -718,7 +762,9 @@ class Poet(MarkovTextGenerator):
         for s in string_tuple:
             if not s.isalpha():
                 continue
-            return self.rhyme_dictionary.get_rhymes(s)
+            if self.syllable_calculate(s):
+                return self.rhyme_dictionary.get_rhymes(s)
+            break
         return []
 
     def token_is_correct(self, token):
@@ -768,9 +814,8 @@ class Poet(MarkovTextGenerator):
         _weights = []
         variants_list = list(frozenset(variants))
         shuffle(variants_list)
-        var_len = (10 if self.user_feedback.use_module else 100)
         for token in variants_list:
-            if len(good_variants) >= var_len:
+            if len(good_variants) >= 10:
                 #  Иначе цикл может затянуться на несколько тысяч итераций.
                 break
             if not self.rhyme_dictionary.is_rus_word(token):
