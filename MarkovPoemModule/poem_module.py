@@ -680,7 +680,7 @@ class Poem(object):
                 _len_before = len(_start_words)
                 _start_words = frozenset(self.poet._get_synonyms(_start_words))
 
-                if (_len_before == len(_start_words)) or (try_counter > 5):
+                if (_len_before == len(_start_words)) or (try_counter >= 3):
                     _start_words = frozenset()
 
     @staticmethod
@@ -798,6 +798,9 @@ class Poet(MarkovTextGenerator):
         Перегрузка дефолтной функции,
         для выстраивания ритмической конструкции, во время генерации.
         """
+        current_string = tuple(current_string)
+        if self._syll_calculate_in_tuple(current_string) > len(final_meter):
+            raise NotRightMeter("Размер строки больше допустимого.")
         try:
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
@@ -824,8 +827,11 @@ class Poet(MarkovTextGenerator):
                     _weight = variants.count(token)
                     _weights.append(_weight)
                 continue
+            _variant = current_string + (token,)
+            if self._syll_calculate_in_tuple(_variant) > len(final_meter):
+                continue
             try:
-                _meter = self.get_string_meter((token,)) + meter
+                _meter = self.get_string_meter(_variant)
             except NotVariantExcept:
                 continue
             _weight = self.is_good_meter(_meter, final_meter)
