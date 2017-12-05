@@ -194,7 +194,7 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.use_module = self.__get_module_switcher(True)
+        self.use_module = self.__get_module_switcher(False)
 
     def __get_module_switcher(self, use_module=True):
         if use_module:
@@ -846,7 +846,7 @@ class Poet(MarkovTextGenerator):
                 #  Иначе цикл может затянуться на несколько тысяч итераций.
                 break
             if not self.rhyme_dictionary.is_rus_word(token):
-                if need_rhymes and (len(current_string) > 5):
+                if need_rhymes and (len(current_string) >= 2):
                     continue
                 if self.token_is_correct(token):
                     good_variants.append(token)
@@ -967,7 +967,6 @@ class Poet(MarkovTextGenerator):
                             if token.group() == tok:
                                 weight += 1
                     if weight:
-                        weight *= 2
                         _variants.append((tokens, False))
                         _weights.append(weight)
                     break
