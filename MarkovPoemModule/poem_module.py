@@ -637,6 +637,18 @@ class Poem(object):
                 return False
         return True
 
+    def get_storage_sum(self, key):
+        _sum = 0
+        for _string_type in (key.lower(), key.upper()):
+            _sum += len(self.string_storage.get(_string_type, []))
+        return _sum
+
+    def _get_need_sum(self, key):
+        _sum = 0
+        for _string_type in (key.lower(), key.upper()):
+            _sum += self.verse.count(_string_type)
+        return _sum
+
     def set_rhyme_construct(self, key):
 
         if self.time_to_write > 0:
@@ -707,7 +719,7 @@ class Poem(object):
                 if not re_string_meter.search(_temp_string_meter):
                     continue
 
-                if not need_rhymes:
+                if (self.get_storage_sum(key) + 1) < self._get_need_sum(key):
                     try:
                         _need_rhymes = self.poet.get_rhyme_words(string)
                     except NotVariantExcept:
@@ -1005,28 +1017,26 @@ class Poet(MarkovTextGenerator):
             return (choice(self.start_arrays), False)
 
         _variants = []
-        _weights = []
         for tokens in self.start_arrays:
             for tok in tokens:
                 if tok.isalpha():
-                    weight = 0
                     for word in rhymes:
                         word = word.strip().lower()
                         for token in self.ONLY_WORDS.finditer(word):
                             if token.group() == tok:
-                                weight += 1
-                    if weight:
-                        _variants.append((tokens, False))
-                        _weights.append(weight)
+                                _variants.append((tokens, False))
+                                break
+                        else:
+                            continue
+                        break
                     break
             else:
                 _variants.append((tokens, True))
-                _weights.append(1)
 
         if not _variants:
             raise NotVariantExcept("Варианты не найдены.")
 
-        return choices(_variants, weights=_weights, k=1)[0]
+        return choice(_variants)
 
     def update(self, data, fromfile=True):
         """
