@@ -539,7 +539,7 @@ class Poem(object):
         "октава":
             {"meter_size": 5, "meter": "ямб", "verse": "aBaBaBcc"},
         "терцина":
-            {"meter_size": 5, "meter": "ямб", "verse": "AbA bCb CdC"}
+            {"meter_size": 5, "meter": "ямб", "verse": "AbA bCb CdC dAd"}
     }
 
     def __init__(
@@ -675,7 +675,9 @@ class Poem(object):
                     raise WaitExcept("Вышло время на написание строфы.")
 
             try_counter += 1
-            need_rhymes = _need_rhymes = ()
+            _need_rhymes = []
+            need_rhymes = set()
+            _used_rhymes = set()
             _loop_counter = 0
             for _string_type in (key.lower(), key.upper()):
                 if _string_type in self.string_storage.keys():
@@ -721,13 +723,15 @@ class Poem(object):
 
                 if (self.get_storage_sum(key) + 1) < self._get_need_sum(key):
                     try:
-                        _need_rhymes = self.poet.get_rhyme_words(string)
+                        _need_rhymes, use_word = self.poet.get_rhyme_words(
+                            string
+                        )
                     except NotVariantExcept:
                         continue
                     if not _need_rhymes:
                         continue
-
-                    need_rhymes = _need_rhymes
+                    _used_rhymes.add(use_word)
+                    need_rhymes = set(_need_rhymes) - _used_rhymes
 
                 _loop_counter = 0
                 self.string_storage[string_type].append(string)
@@ -832,9 +836,9 @@ class Poet(MarkovTextGenerator):
             if not s.isalpha():
                 continue
             if self.syllable_calculate(s):
-                return self.rhyme_dictionary.get_rhymes(s)
+                return (self.rhyme_dictionary.get_rhymes(s), s)
             break
-        return []
+        return ([], "")
 
     def token_is_correct(self, token):
         """
