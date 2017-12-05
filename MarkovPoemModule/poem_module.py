@@ -733,7 +733,7 @@ class Poet(MarkovTextGenerator):
         self.browser = None
         self.poems = []
         self.vocabulars_in_tokens = []
-        self._const_fullstring_weight = 50
+        self._const_fullstring_weight = int(1e8)
 
         self.dump_file = abspath(expanduser("~\\poemModuleDatabase.json"))
         if not isfile(self.dump_file):
@@ -836,7 +836,6 @@ class Poet(MarkovTextGenerator):
                     raise NotRightMeter("Рифма не найдена.")
                 print(_string_now)
                 raise StringIsFull("Строка готова.")
-        print(_string_now)
         good_variants = []
         _weights = []
         variants_list = list(frozenset(variants))
@@ -846,7 +845,7 @@ class Poet(MarkovTextGenerator):
                 #  Иначе цикл может затянуться на несколько тысяч итераций.
                 break
             if not self.rhyme_dictionary.is_rus_word(token):
-                if need_rhymes and (len(current_string) >= 2):
+                if need_rhymes and (len(current_string) >= 3):
                     continue
                 if self.token_is_correct(token):
                     good_variants.append(token)
@@ -867,7 +866,7 @@ class Poet(MarkovTextGenerator):
             if not _weight:
                 continue
             if token in poem_object.temp_used_words:
-                _weight *= 10
+                _weight *= 1000
             _weight *= variants.count(token)
             good_variants.append(token)
             _weights.append(_weight)
@@ -894,7 +893,7 @@ class Poet(MarkovTextGenerator):
         if current_re.search(string_meter):
             if abs(string_size) == full_size:
                 return self._const_fullstring_weight
-            return 10
+            return 1
         return 0
 
     def get_string_meter(self, string_typle):
