@@ -531,36 +531,63 @@ class Poem(object):
         "анапест": "001"
     }
 
+    presets = {
+        "онегинская_строфа":
+            {"meter_size": 4, "meter": "ямб", "verse": "AbAb CCdd EffE gg"},
+        "децима":
+            {"meter_size": 4, "meter": "хорей", "verse": "AbbAA ccDDc"},
+        "октава":
+            {"meter_size": 5, "meter": "ямб", "verse": "aBaBaBcc"},
+        "терцина":
+            {"meter_size": 5, "meter": "ямб", "verse": "AbA bCb CdC"}
+    }
+
     def __init__(
         self,
         poet_object,
-        verse="AbAb",
-        meter_size=4,
-        meter="ямб",
         time_to_write=0,
-        *used_words
+        used_words=(),
+        preset=None,
+        **kwargs
     ):
 
-        while True:
-            _meter = self.meters.get(meter, None)
-            if _meter:
-                break
-            meter = choice(tuple(self.meters.keys()))
+        preset, preset_setting = self.parse_preset(preset)
+        kwargs.update(preset_setting)
+        _meter = self.meters[preset_setting["meter"]]
 
         self.poet = poet_object
-        self.verse = verse
         self.__used_words = set(used_words)
         self.temp_used_words = frozenset()
 
-        self.string_storage = dict.fromkeys(self.verse, [])
+        self.verse = preset_setting["verse"]
+        _verse = preset_setting["verse"].replace(chr(32), "")
 
-        self.sizes = dict(self.__get_size_dict(verse, meter_size, _meter))
+        self.string_storage = dict.fromkeys(_verse, [])
+
+        self.sizes = dict(
+            self.__get_size_dict(_verse, preset_setting["meter_size"], _meter)
+        )
 
         self.poem = ""
 
         self.time_to_write = int(time_to_write)
 
-        self.__poem_type_tag = "#{0}стопный_{1}".format(meter_size, meter)
+        self.__poem_type_tag = ""
+        if preset:
+            self.__poem_type_tag += "#{0}\r\n".format(preset)
+        self.__poem_type_tag += "#{meter_size}стопный_{meter}".format(
+            **preset_setting
+        )
+
+    def parse_preset(self, preset=None):
+        if preset is None:
+            return (None, {})
+        if preset == "random":
+            preset = choice(tuple(self.presets.keys()))
+        pr = self.presets.get(preset, None)
+        if not pr:
+            return (None, {})
+        return (preset, pr)
 
     def get_meter_and_re(self, string_name, meter_size, meter_one):
 
@@ -602,18 +629,32 @@ class Poem(object):
         except StringIsFull:
             pass
 
+    def storage_is_full(self, key):
+
+        for _string_type in (key.lower(), key.upper()):
+            _data = self.string_storage.get(_string_type, [])
+            if self.verse.count(_string_type) > len(_data):
+                return False
+        return True
+
     def set_rhyme_construct(self, key):
 
         if self.time_to_write > 0:
             _start_time = time()
 
-        try_counter = 0
-        _final_meter, re_string_meter = self.sizes[key]
+        _type_iter = filter(
+            lambda x: (x in self.verse),
+            cycle((key.lower(), key.upper()))
+        )
+        string_type = _type_iter.__next__()
+        _final_meter, re_string_meter = self.sizes[string_type]
         string_size = len(_final_meter)
+        _string_len = self.verse.count(string_type)
+
+        try_counter = 0
         self.temp_used_words = frozenset(
             self.poet._get_synonyms(self.__used_words)
         )
-        _string_len = self.verse.count(key)
 
         while True:
 
@@ -624,7 +665,9 @@ class Poem(object):
             try_counter += 1
             need_rhymes = _need_rhymes = ()
             _loop_counter = 0
-            self.string_storage[key] = []
+            for _string_type in (key.lower(), key.upper()):
+                if _string_type in self.string_storage.keys():
+                    self.string_storage[_string_type] = []
             print(
                 "{0} попытка генерации строфы {1!r}.".format(
                     try_counter,
@@ -636,7 +679,7 @@ class Poem(object):
                 if need_rhymes or self.temp_used_words:
                     _loop_counter += 1
 
-                if _loop_counter > 50:
+                if _loop_counter > 75:
                     break
 
                 try:
@@ -664,7 +707,7 @@ class Poem(object):
                 if not re_string_meter.search(_temp_string_meter):
                     continue
 
-                if (len(self.string_storage[key]) + 1) < _string_len:
+                if not need_rhymes:
                     try:
                         _need_rhymes = self.poet.get_rhyme_words(string)
                     except NotVariantExcept:
@@ -675,9 +718,14 @@ class Poem(object):
                     need_rhymes = _need_rhymes
 
                 _loop_counter = 0
-                self.string_storage[key].append(string)
-                if len(self.string_storage[key]) >= _string_len:
+                self.string_storage[string_type].append(string)
+                if self.storage_is_full(key):
                     return
+                if len(self.string_storage[string_type]) >= _string_len:
+                    string_type = _type_iter.__next__()
+                    _final_meter, re_string_meter = self.sizes[string_type]
+                    string_size = len(_final_meter)
+                    _string_len = self.verse.count(string_type)
 
             if self.temp_used_words:
                 _len_before = len(self.temp_used_words)
@@ -708,13 +756,15 @@ class Poem(object):
         return out_text.strip()
 
     def create_poem(self):
+        empty_string_token = chr(32)
         self.poem = self.__poem_type_tag
         self.poem += "\r\n\r\n\r\n"
-        for key in self.string_storage.copy().keys():
+        for key in set(self.verse.replace(empty_string_token, "").lower()):
             self.set_rhyme_construct(key)
         for key in self.verse:
-            string = self.string_storage[key].pop(0)
-            self.poem += self.tuple_to_string(string)
+            if key != empty_string_token:
+                string = self.string_storage[key].pop(0)
+                self.poem += self.tuple_to_string(string)
             self.poem += "\r\n"
 
 
@@ -994,27 +1044,19 @@ class Poet(MarkovTextGenerator):
             yield word.strip().lower()
             yield from self.synonyms_dictionary.get_synonyms(word)
 
-    def write_poem(
-        self,
-        verse="AbAb",
-        size=4,
-        meter="ямб",
-        time_to_write=0,
-        *start_words
-    ):
+    def write_poem(self, preset=None, **kwargs):
 
         self.browser = BrowserClass(poet_module=self)
         try:
-            poem = Poem(
-                self,
-                verse,
-                size,
-                meter,
-                time_to_write,
-                *start_words
-            )
+            poem = Poem(poet_object=self, preset=preset, **kwargs)
             poem.create_poem()
             _poem = poem.poem
+            print(
+                "_" * 50,
+                _poem,
+                "_" * 50,
+                sep="\r\n"
+            )
             self.poems.append(_poem)
             self.create_dump()
             return _poem
