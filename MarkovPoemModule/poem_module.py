@@ -538,7 +538,7 @@ class Poem(object):
         meter_size=4,
         meter="ямб",
         time_to_write=0,
-        *start_words
+        *used_words
     ):
 
         while True:
@@ -549,7 +549,8 @@ class Poem(object):
 
         self.poet = poet_object
         self.verse = verse
-        self.start_words = set(start_words)
+        self.__used_words = set(used_words)
+        self.temp_used_words = frozenset()
 
         self.string_storage = dict.fromkeys(self.verse, [])
 
@@ -594,6 +595,7 @@ class Poem(object):
             for token in self.poet._get_generate_tokens(
                 *rhymes,
                 final_meter=final_meter,
+                poem_object=self,
                 size=-1
             ):
                 yield token
@@ -608,7 +610,9 @@ class Poem(object):
         try_counter = 0
         _final_meter, re_string_meter = self.sizes[key]
         string_size = len(_final_meter)
-        _start_words = frozenset(self.poet._get_synonyms(self.start_words))
+        self.temp_used_words = frozenset(
+            self.poet._get_synonyms(self.__used_words)
+        )
         _string_len = self.verse.count(key)
 
         while True:
@@ -629,8 +633,7 @@ class Poem(object):
             )
             while True:
 
-                rhymes = need_rhymes or _start_words
-                if rhymes:
+                if need_rhymes or self.temp_used_words:
                     _loop_counter += 1
 
                 if _loop_counter > 50:
@@ -639,7 +642,7 @@ class Poem(object):
                 try:
                     string = tuple(
                         self.get_string(
-                            rhymes=rhymes,
+                            rhymes=need_rhymes,
                             final_meter=_final_meter
                         )
                     )
@@ -676,12 +679,15 @@ class Poem(object):
                 if len(self.string_storage[key]) >= _string_len:
                     return
 
-            if _start_words:
-                _len_before = len(_start_words)
-                _start_words = frozenset(self.poet._get_synonyms(_start_words))
+            if self.temp_used_words:
+                _len_before = len(self.temp_used_words)
+                self.temp_used_words = frozenset(
+                    self.poet._get_synonyms(self.temp_used_words)
+                )
+                _len_after = len(self.temp_used_words)
 
-                if (_len_before == len(_start_words)) or (try_counter >= 3):
-                    _start_words = frozenset()
+                if (_len_before == _len_after) or (try_counter >= 3):
+                    self.temp_used_words = frozenset()
 
     @staticmethod
     def tuple_to_string(string_tuple):
@@ -717,7 +723,7 @@ class Poet(MarkovTextGenerator):
     vowels = "ауоыиэяюеёaeiouy"
     tokensBase = "poetModuleTokens"
 
-    def __init__(self, chain_order=3, **kwargs):
+    def __init__(self, chain_order=2, **kwargs):
         super().__init__(chain_order=chain_order, **kwargs)
 
         self.rhyme_dictionary = RhymeCreator(poet_module=self)
@@ -727,6 +733,7 @@ class Poet(MarkovTextGenerator):
         self.browser = None
         self.poems = []
         self.vocabulars_in_tokens = []
+        self._const_fullstring_weight = 50
 
         self.dump_file = abspath(expanduser("~\\poemModuleDatabase.json"))
         if not isfile(self.dump_file):
@@ -792,12 +799,26 @@ class Poet(MarkovTextGenerator):
         self,
         variants,
         current_string,
-        final_meter
+        need_rhymes,
+        final_meter,
+        poem_object,
+        start_words
     ):
         """
         Перегрузка дефолтной функции,
         для выстраивания ритмической конструкции, во время генерации.
+
+        :need_rhymes:
+            Если необходимо найти рифму,
+            но не вышло это сделать, при первичной подборке токенов.
+            Если True, функция попытается это сделать.
+
+        :start_words:
+            Варианты рифм.
+
         """
+        if need_rhymes:
+            need_rhymes = bool(start_words)
         current_string = tuple(current_string)
         if self._syll_calculate_in_tuple(current_string) > len(final_meter):
             raise NotRightMeter("Размер строки больше допустимого.")
@@ -805,14 +826,17 @@ class Poet(MarkovTextGenerator):
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
             raise NotRightMeter("Невозможно определить ударение.")
-        print(Poem.tuple_to_string(current_string))
+        _string_now = Poem.tuple_to_string(current_string)
         if meter:
             _weight = self.is_good_meter(meter, final_meter)
             if not _weight:
                 raise NotRightMeter("Строка не годится, для продолжения.")
-            elif _weight == 50:
+            elif _weight == self._const_fullstring_weight:
+                if need_rhymes:
+                    raise NotRightMeter("Рифма не найдена.")
+                print(_string_now)
                 raise StringIsFull("Строка готова.")
-
+        print(_string_now)
         good_variants = []
         _weights = []
         variants_list = list(frozenset(variants))
@@ -822,11 +846,16 @@ class Poet(MarkovTextGenerator):
                 #  Иначе цикл может затянуться на несколько тысяч итераций.
                 break
             if not self.rhyme_dictionary.is_rus_word(token):
+                if need_rhymes and (len(current_string) > 5):
+                    continue
                 if self.token_is_correct(token):
                     good_variants.append(token)
                     _weight = variants.count(token)
                     _weights.append(_weight)
                 continue
+            if need_rhymes:
+                if token not in start_words:
+                    continue
             _variant = current_string + (token,)
             if self._syll_calculate_in_tuple(_variant) > len(final_meter):
                 continue
@@ -837,12 +866,17 @@ class Poet(MarkovTextGenerator):
             _weight = self.is_good_meter(_meter, final_meter)
             if not _weight:
                 continue
+            if token in poem_object.temp_used_words:
+                _weight *= 10
             _weight *= variants.count(token)
             good_variants.append(token)
             _weights.append(_weight)
         if not good_variants:
             raise NotRightMeter("Не найдено ни одного пригодного варианта.")
-        return choices(good_variants, weights=_weights, k=1)[0]
+        _result_choice = choices(good_variants, weights=_weights, k=1)[0]
+        if need_rhymes:
+            need_rhymes = (_result_choice not in start_words)
+        return (_result_choice, {"need_rhymes": need_rhymes})
 
     def is_good_meter(self, string_meter, full_meter):
         """
@@ -859,8 +893,8 @@ class Poet(MarkovTextGenerator):
         current_re = re_compile(full_meter[string_size:].replace('1', "[01]"))
         if current_re.search(string_meter):
             if abs(string_size) == full_size:
-                return 50
-            return 2
+                return self._const_fullstring_weight
+            return 10
         return 0
 
     def get_string_meter(self, string_typle):
@@ -905,15 +939,21 @@ class Poet(MarkovTextGenerator):
             else:
                 yield token
 
-    def get_start_array(self, *start_words):
+    def get_start_array(self, *rhymes):
         """
         Перегрузка стандартной функции.
         Если не находит нужного предложения, бросает исключение.
+
+        Возвращает кортеж вида:
+            (
+                Стартовый массив -> tuple,
+                Зарифмовано ли уже -> bool
+            )
         """
         if not self.start_arrays:
             raise MarkovTextExcept("Не с чего начинать генерацию.")
-        if not start_words:
-            return choice(self.start_arrays)
+        if not rhymes:
+            return (choice(self.start_arrays), False)
 
         _variants = []
         _weights = []
@@ -921,15 +961,19 @@ class Poet(MarkovTextGenerator):
             for tok in tokens:
                 if tok.isalpha():
                     weight = 0
-                    for word in start_words:
+                    for word in rhymes:
                         word = word.strip().lower()
                         for token in self.ONLY_WORDS.finditer(word):
                             if token.group() == tok:
                                 weight += 1
                     if weight:
-                        _variants.append(tokens)
+                        weight *= 2
+                        _variants.append((tokens, False))
                         _weights.append(weight)
                     break
+            else:
+                _variants.append((tokens, True))
+                _weights.append(1)
 
         if not _variants:
             raise NotVariantExcept("Варианты не найдены.")
