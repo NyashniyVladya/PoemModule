@@ -758,16 +758,19 @@ class Poem(object):
         out_text = ""
         _need_capialize = True
         for token in reversed(string_tuple):
+
             if (token in "$^") or token.isdigit():
-                if token in "$^":
-                    _need_capialize = True
                 continue
+
             if Poet.ONLY_WORDS.search(token):
                 out_text += " "
             if _need_capialize:
                 _need_capialize = False
                 token = token.title()
             out_text += token
+
+            if Poet.END_TOKENS.search(token):
+                _need_capialize = True
 
         return out_text.strip()
 
