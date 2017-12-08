@@ -63,20 +63,25 @@ class BrowserClass(Chrome):
 
     spaces = re_compile("\s+")
 
-    MorpherURL = "http://morpher.ru/accentizer"
-    MorpherTextAreaID = (
+    morpherURL = "http://morpher.ru/accentizer"
+    morpherTextArea = (
+        By.ID,
         "ctl00_ctl00_BodyPlaceHolder_ContentPlaceHolder1_TextBox1"
     )
-    morpherButtonID = (
+    morpherButton = (
+        By.ID,
         "ctl00_ctl00_BodyPlaceHolder_ContentPlaceHolder1_SubmitButton"
     )
 
-    rifmusURL = "https://rifmus.net/custom/"
-    rifmusLetterCSS = (
-        "#stressform > table > tbody > tr > td:nth-child({0}) > label"
+    phoneticURL = "https://vnutrislova.net/выбор-ударения/{0}"
+    phonecticResult = (
+        By.CSS_SELECTOR,
+        "#result > div.phonetic > p.h2.space-top > span"
     )
-    rifmusButtonCSS = "#ssub"
-    rifmusResult = "#result > div:nth-child(3)"
+    phoneticConfirm = (
+        By.CSS_SELECTOR,
+        "#submit"
+    )
 
     def __init__(self, poet_module, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -87,38 +92,29 @@ class BrowserClass(Chrome):
         if self.poet_module.browser is not self:
             self.poet_module.browser = self
 
-    def _get_rhymes(self, word):
-        """
-        Ищет рифмы на сайте, с указанием ударения.
-        """
+    @staticmethod
+    def phoneticLetter(letNum):
+        return (
+            By.XPATH,
+            '//*[@id="accent_selection_form"]/div[{0}]/label'.format(letNum)
+        )
+
+    def get_phonetic_analysis(self, word):
+
+        word = word.lower().strip()
         letNum = (
             self.poet_module.accentuation_dictionary._get_acc_letter(word)
         )
+        _url = self.phoneticURL.format(word)
         with self.__browser_lock:
-            try:
-
-                _url = parse.urljoin(self.rifmusURL, parse.quote(word))
-                self.get(_url)
-
-                elem_name = self.rifmusLetterCSS.format(letNum)
-                letter = self._wait_element(elem_name, By.CSS_SELECTOR)
-                letter.click()
-
-                button = self._wait_element(
-                    self.rifmusButtonCSS,
-                    By.CSS_SELECTOR
-                )
-                button.click()
-
-                result = self._wait_element(self.rifmusResult, By.CSS_SELECTOR)
-                result = result.text.strip().lower()
-
-                for wrd in self.spaces.split(result):
-                    if self.poet_module.rhyme_dictionary.is_rus_word(wrd):
-                        yield wrd
-
-            except TimeoutException:
-                pass
+            self.get(_url)
+            letterButton = self._wait_element(self.phoneticLetter(letNum))
+            letterButton.click()
+            confirmButton = self._wait_element(self.phoneticConfirm)
+            confirmButton.click()
+            result = self._wait_element(self.phonecticResult)
+            result = result.text[1:-1].strip()
+            return result
 
     def format_word(self, word):
         """
@@ -148,15 +144,15 @@ class BrowserClass(Chrome):
         SPLITTER = chr(124)
         with self.__browser_lock:
             try:
-                self.get(self.MorpherURL)
-                area = self._wait_element(self.MorpherTextAreaID)
-                button = self._wait_element(self.morpherButtonID)
+                self.get(self.morpherURL)
+                area = self._wait_element(self.morpherTextArea)
+                button = self._wait_element(self.morpherButton)
 
                 area.clear()
                 area.send_keys(word.strip().lower())
                 button.click()
 
-                new_area = self._wait_element(self.MorpherTextAreaID)
+                new_area = self._wait_element(self.morpherTextArea)
 
                 result = tuple(
                     filter(
@@ -168,14 +164,12 @@ class BrowserClass(Chrome):
             except TimeoutException:
                 return None
 
-    def _wait_element(self, element, elem_type=By.ID):
+    def _wait_element(self, element):
         """
-        Ожидает загрузки элемента, указанного в element_id, и возвращает его.
+        Ожидает загрузки элемента, указанного в element, и возвращает его.
         """
         return self.__wait_object.until(
-            expected_conditions.visibility_of_element_located(
-                (elem_type, element)
-            ),
+            expected_conditions.visibility_of_element_located(element),
             "Превышено время ожидания элемента {0!r}.".format(element)
         )
 
@@ -194,7 +188,7 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.use_module = self.__get_module_switcher(False)
+        self.use_module = self.__get_module_switcher(True)
 
     def __get_module_switcher(self, use_module=True):
         if use_module:
@@ -237,17 +231,9 @@ class UserFeedback(object):
             return _answer
 
 
-class _SessionParent(Session):
+class _BackupClass(object):
 
     def __init__(self, file_db):
-        super().__init__()
-        self.headers["User-Agent"] = (
-            "Mozilla/5.0 (Windows NT 6.3; WOW64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/61.0.3163.91 "
-            "Safari/537.36 "
-            "OPR/48.0.2685.32"
-        )
         self.database = {}
         self.file_database = abspath(expanduser("~\\{0}.json".format(file_db)))
         if not isfile(self.file_database):
@@ -264,6 +250,48 @@ class _SessionParent(Session):
     def load_dump(self):
         with open(self.file_database, "rb") as js_file:
             self.database = dict(json.load(js_file))
+
+
+class _SessionParent(_BackupClass, Session):
+
+    def __init__(self, file_db):
+
+        _BackupClass.__init__(self, file_db)
+        Session.__init__(self)
+
+        self.headers["User-Agent"] = (
+            "Mozilla/5.0 (Windows NT 6.3; WOW64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/61.0.3163.91 "
+            "Safari/537.36 "
+            "OPR/48.0.2685.32"
+        )
+
+
+class ClausesCreator(_BackupClass):
+
+    def __init__(self, poet_module):
+        super().__init__("clauses")
+
+        self.poet_module = poet_module
+
+    def get_clause(self, word):
+        word = word.lower().strip()
+        _clause = self.database.get(word, None)
+        if _clause is not None:
+            return _clause
+
+        phonems_string = self.poet_module.browser.get_phonetic_analysis(word)
+        accentuations = self.poet_module.accentuation_dictionary.get_acc(word)
+
+        syllable = 0
+        for ind, symb in enumerate(phonems_string):
+            if symb in self.poet_module.vowels:
+                syllable += 1
+                if syllable in accentuations:
+                    _clause = self.database[word] = phonems_string[ind:]
+                    self.create_dump()
+                    return _clause
 
 
 class SynonymsCreator(_SessionParent):
@@ -423,10 +451,9 @@ class AccentuationCreator(_SessionParent):
             if accs:
                 return accs
 
-        if self.poet_module.browser:
-            words = self.poet_module.browser.get_acc(word)
-            if words:
-                return list(map(self._get_syllable_num, words))
+        words = self.poet_module.browser.get_acc(word)
+        if words:
+            return list(map(self._get_syllable_num, words))
 
         if not self.poet_module.user_feedback.use_module:
             raise NotVariantExcept("Ударение в сети не найдено.")
@@ -439,86 +466,6 @@ class AccentuationCreator(_SessionParent):
             accs = list(self.ask_for_user(word))
             if accs:
                 return accs
-
-
-class RhymeCreator(_SessionParent):
-
-    URL = "https://rifmus.net/rifma/"
-    RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
-
-    def __init__(self, poet_module):
-        super().__init__("rhymes")
-        self.poet_module = poet_module
-
-    def is_rus_word(self, word):
-        if not word:
-            return False
-        return all(map(lambda s: (s.lower() in self.RUS), word))
-
-    def get_rhymes(self, word):
-        word = word.lower().strip()
-        rhymes = self.database.get(word, None)
-        if rhymes is not None:
-            return rhymes
-        rhymes = self.database[word] = list(
-            self.__get_rhymes(word)
-        )
-        self.create_dump()
-        return rhymes
-
-    def ask_for_user(self, word):
-
-        question = (
-            "[стихомодуль]\r\n"
-            "Какие рифмы у слова {0!r}?\r\n"
-            "(Ответ - рифмующиеся слова, через запятую)\r\n"
-        ).format(word)
-
-        answer = self.poet_module.user_feedback.ask_to_vk(question)
-
-        for part in answer.split(","):
-            part = part.lower().strip()
-            if self.is_rus_word(part):
-                yield part
-
-    def __get_rhymes(self, word):
-
-        if self.poet_module.browser:
-            yield from self.poet_module.browser._get_rhymes(word)
-
-        else:
-            _url = parse.urljoin(self.URL, parse.quote(word))
-            while True:
-                sleep(.5)
-                print("Запрос рифмы к слову {0!r}.".format(word))
-                req = self.get(_url)
-                if req.status_code in (200, 404):
-                    break
-                print(
-                    "Ошибка запроса. Код {0}.\r\n{1!r}".format(
-                        req.status_code,
-                        req.text
-                    )
-                )
-            if req.status_code == 200:
-                page = BeautifulSoup(req.text, "lxml")
-                wordsElement = page.findChild(attrs={"class": "multicolumn"})
-                if wordsElement:
-                    for element in wordsElement.findAll("li"):
-                        rhyme = element.getText().lower().strip()
-                        if self.is_rus_word(rhyme):
-                            yield rhyme
-
-            elif self.poet_module.user_feedback.use_module:
-                _counter = 0
-                while True:
-                    _counter += 1
-                    if _counter > self.poet_module.user_feedback.try_count:
-                        raise NotVariantExcept("Запросы исчерпаны.")
-                    accs = list(self.ask_for_user(word))
-                    if accs:
-                        yield from accs
-                        break
 
 
 class Poem(object):
@@ -557,6 +504,7 @@ class Poem(object):
 
         self.poet = poet_object
         self.__used_words = set(used_words)
+        self.used_rhymes = set()
         self.temp_used_words = frozenset()
 
         self.verse = preset_setting["verse"]
@@ -617,10 +565,10 @@ class Poem(object):
                 return False
         return True
 
-    def get_string(self, rhymes, final_meter):
+    def get_string(self, final_meter, rhyme_word=None):
         try:
             for token in self.poet._get_generate_tokens(
-                *rhymes,
+                rhyme_word=rhyme_word,
                 final_meter=final_meter,
                 poem_object=self,
                 size=-1
@@ -675,9 +623,8 @@ class Poem(object):
                     raise WaitExcept("Вышло время на написание строфы.")
 
             try_counter += 1
-            _need_rhymes = []
-            need_rhymes = set()
-            _used_rhymes = set()
+            self.used_rhymes = set()
+            word_for_rhyme = None
             _loop_counter = 0
             for _string_type in (key.lower(), key.upper()):
                 if _string_type in self.string_storage.keys():
@@ -690,7 +637,7 @@ class Poem(object):
             )
             while True:
 
-                if need_rhymes or self.temp_used_words:
+                if word_for_rhyme:
                     _loop_counter += 1
 
                 if _loop_counter > 75:
@@ -699,7 +646,7 @@ class Poem(object):
                 try:
                     string = tuple(
                         self.get_string(
-                            rhymes=need_rhymes,
+                            rhyme_word=word_for_rhyme,
                             final_meter=_final_meter
                         )
                     )
@@ -722,16 +669,11 @@ class Poem(object):
                     continue
 
                 if (self.get_storage_sum(key) + 1) < self._get_need_sum(key):
-                    try:
-                        _need_rhymes, use_word = self.poet.get_rhyme_words(
-                            string
-                        )
-                    except NotVariantExcept:
+                    word_for_rhyme = self.poet.get_rhyme_word(string)
+                    if not word_for_rhyme:
+                        word_for_rhyme = None
                         continue
-                    if not _need_rhymes:
-                        continue
-                    _used_rhymes.add(use_word)
-                    need_rhymes = set(_need_rhymes) - _used_rhymes
+                    self.used_rhymes.add(word_for_rhyme)
 
                 _loop_counter = 0
                 self.string_storage[string_type].append(string)
@@ -789,13 +731,15 @@ class Poem(object):
 
 class Poet(MarkovTextGenerator):
 
+    RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
     vowels = "ауоыиэяюеёaeiouy"
     tokensBase = "poetModuleTokens"
 
     def __init__(self, chain_order=2, **kwargs):
         super().__init__(chain_order=chain_order, **kwargs)
 
-        self.rhyme_dictionary = RhymeCreator(poet_module=self)
+        ##  self.rhyme_dictionary = RhymeCreator(poet_module=self)
+        self.clauses_dictionary = ClausesCreator(poet_module=self)
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
         self.user_feedback = UserFeedback(poet_module=self)
@@ -808,6 +752,12 @@ class Poet(MarkovTextGenerator):
         if not isfile(self.dump_file):
             self.create_dump()
         self.load_dump()
+
+    @classmethod
+    def is_rus_word(cls, word):
+        if not word:
+            return False
+        return all(map(lambda s: (s.lower() in cls.RUS), word))
 
     def create_dump(self):
         _dump_data = {
@@ -833,22 +783,41 @@ class Poet(MarkovTextGenerator):
         super().create_base()
         self.start_arrays = tuple(frozenset(self.get_corrected_start_arrays()))
 
-    def get_rhyme_words(self, string_tuple):
+    def _is_correct_tok(self, tok):
+        if self.is_rus_word(tok) and self.syllable_calculate(tok):
+            return True
+        return False
+
+    def is_rhyme(self, word1, word2):
+        """
+        Возвращает булевое значение, рифмуются ли два переданных слова.
+        """
+        if self._is_correct_tok(word1) and self._is_correct_tok(word2):
+            clause1 = self.clauses_dictionary.get_clause(word1)
+            clause2 = self.clauses_dictionary.get_clause(word2)
+            if clause1 == clause2:
+                return True
+        return False
+
+    def get_rhyme_word(self, string_tuple):
+        """
+        Возвращает слово, которое рифмуем, или None, если оно неподходящее.
+        """
 
         for s in string_tuple:
             if not s.isalpha():
                 continue
-            if self.syllable_calculate(s):
-                return (self.rhyme_dictionary.get_rhymes(s), s)
+            if self._is_correct_tok(s):
+                return s
             break
-        return ([], "")
+        return None
 
     def token_is_correct(self, token):
         """
         Подходит ли токен, для генерации стиха.
         Допускаются русские слова, знаки препинания и символы начала и конца.
         """
-        if self.rhyme_dictionary.is_rus_word(token):
+        if self.is_rus_word(token):
             return True
         elif self.ONLY_MARKS.search(token):
             return True
@@ -868,26 +837,28 @@ class Poet(MarkovTextGenerator):
         self,
         variants,
         current_string,
-        need_rhymes,
+        need_rhyme,
         final_meter,
         poem_object,
-        start_words
+        start_words,
+        rhyme_word
+
     ):
         """
         Перегрузка дефолтной функции,
         для выстраивания ритмической конструкции, во время генерации.
 
-        :need_rhymes:
+        :need_rhyme:
             Если необходимо найти рифму,
             но не вышло это сделать, при первичной подборке токенов.
             Если True, функция попытается это сделать.
 
-        :start_words:
-            Варианты рифм.
+        :rhyme_word:
+            Слово, для рифмовки.
 
         """
-        if need_rhymes:
-            need_rhymes = bool(start_words)
+        if need_rhyme:
+            need_rhyme = bool(rhyme_word)
         current_string = tuple(current_string)
         if self._syll_calculate_in_tuple(current_string) > len(final_meter):
             raise NotRightMeter("Размер строки больше допустимого.")
@@ -901,7 +872,7 @@ class Poet(MarkovTextGenerator):
             if not _weight:
                 raise NotRightMeter("Строка не годится, для продолжения.")
             elif _weight == self._const_fullstring_weight:
-                if need_rhymes:
+                if need_rhyme:
                     raise NotRightMeter("Рифма не найдена.")
                 print(_string_now)
                 raise StringIsFull("Строка готова.")
@@ -910,20 +881,17 @@ class Poet(MarkovTextGenerator):
         variants_list = list(frozenset(variants))
         shuffle(variants_list)
         for token in variants_list:
-            if len(good_variants) >= 10:
+            if len(good_variants) > 10:
                 #  Иначе цикл может затянуться на несколько тысяч итераций.
                 break
-            if not self.rhyme_dictionary.is_rus_word(token):
-                if need_rhymes and (len(current_string) >= 3):
+            if not self.is_rus_word(token):
+                if need_rhyme and (len(current_string) >= 3):
                     continue
                 if self.token_is_correct(token):
                     good_variants.append(token)
                     _weight = variants.count(token)
                     _weights.append(_weight)
                 continue
-            if need_rhymes:
-                if token not in start_words:
-                    continue
             _variant = current_string + (token,)
             if self._syll_calculate_in_tuple(_variant) > len(final_meter):
                 continue
@@ -934,6 +902,15 @@ class Poet(MarkovTextGenerator):
             _weight = self.is_good_meter(_meter, final_meter)
             if not _weight:
                 continue
+            if need_rhyme:
+                if token in poem_object.used_rhymes:
+                    continue
+                try:
+                    is_rhymes = self.is_rhyme(rhyme_word, token)
+                except NotVariantExcept:
+                    continue
+                if not is_rhymes:
+                    continue
             if token in poem_object.temp_used_words:
                 _weight *= 1000
             _weight *= variants.count(token)
@@ -942,9 +919,11 @@ class Poet(MarkovTextGenerator):
         if not good_variants:
             raise NotRightMeter("Не найдено ни одного пригодного варианта.")
         _result_choice = choices(good_variants, weights=_weights, k=1)[0]
-        if need_rhymes:
-            need_rhymes = (_result_choice not in start_words)
-        return (_result_choice, {"need_rhymes": need_rhymes})
+        if need_rhyme:
+            if self.is_rus_word(_result_choice):
+                need_rhyme = False
+
+        return (_result_choice, {"need_rhyme": need_rhyme})
 
     def is_good_meter(self, string_meter, full_meter):
         """
@@ -1007,7 +986,7 @@ class Poet(MarkovTextGenerator):
             else:
                 yield token
 
-    def get_start_array(self, *rhymes):
+    def get_start_array(self, *not_used, rhyme_word, final_meter, poem_object):
         """
         Перегрузка стандартной функции.
         Если не находит нужного предложения, бросает исключение.
@@ -1015,27 +994,30 @@ class Poet(MarkovTextGenerator):
         Возвращает кортеж вида:
             (
                 Стартовый массив -> tuple,
-                Зарифмовано ли уже -> bool
+                Нужно ли продолжать поиск рифмы -> bool
             )
         """
         if not self.start_arrays:
             raise MarkovTextExcept("Не с чего начинать генерацию.")
-        if not rhymes:
+        if not rhyme_word:
             return (choice(self.start_arrays), False)
 
         _variants = []
-        for tokens in self.start_arrays:
+        _start_arr_list = list(self.start_arrays)
+        shuffle(_start_arr_list)
+        for tokens in _start_arr_list:
+            if len(_variants) > 10:
+                break
             for tok in tokens:
                 if tok.isalpha():
-                    for word in rhymes:
-                        word = word.strip().lower()
-                        for token in self.ONLY_WORDS.finditer(word):
-                            if token.group() == tok:
-                                _variants.append((tokens, False))
+                    if self.is_rus_word(tok):
+                        if tok not in poem_object.used_rhymes:
+                            try:
+                                is_rhymes = self.is_rhyme(rhyme_word, tok)
+                            except NotVariantExcept:
                                 break
-                        else:
-                            continue
-                        break
+                            if is_rhymes:
+                                _variants.append((tokens, False))
                     break
             else:
                 _variants.append((tokens, True))
