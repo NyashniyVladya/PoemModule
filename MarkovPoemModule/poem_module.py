@@ -123,14 +123,17 @@ class BrowserClass(Chrome):
         """
         word = word.strip().lower()
         if 'ё' in word:
-            return self.poet_module.accentuation_dictionary._yo_formatter(word)
+            if word.count('ё') == 1:
+                return self.poet_module.accentuation_dictionary._yo_formatter(
+                    word
+                )
+            return None
 
-        ACCENT = chr(769)
-        if (ACCENT not in word):
+        if (self.poet_module.ACCENT not in word):
             return None
         new_word = []
         for s in word.strip():
-            if s == ACCENT:
+            if s == self.poet_module.ACCENT:
                 if new_word:
                     new_word[-1] = new_word[-1].upper()
                 continue
@@ -139,7 +142,8 @@ class BrowserClass(Chrome):
 
     def get_acc(self, word):
         """
-        Ищет ударение на сайте. Возвращает либо кортеж вариантов, либо None.
+        Ищет ударение на сайте. Возвращает либо вариант (int или None),
+        либо False, если ударение не определено.
         """
         SPLITTER = chr(124)
         with self.__browser_lock:
@@ -160,9 +164,13 @@ class BrowserClass(Chrome):
                         map(self.format_word, new_area.text.split(SPLITTER))
                     )
                 )
-                return (result or None)
-            except TimeoutException:
+                if not result:
+                    return False
+                elif len(result) == 1:
+                    return result[0]
                 return None
+            except TimeoutException:
+                return False
 
     def _wait_element(self, element):
         """
@@ -188,7 +196,11 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.use_module = self.__get_module_switcher(True)
+        self.__use_module = self.__get_module_switcher(True)
+
+    @property
+    def use_module(self):
+        return self.__use_module
 
     def __get_module_switcher(self, use_module=True):
         if use_module:
@@ -228,7 +240,7 @@ class UserFeedback(object):
                 print("Ответ {0!r} получен.".format(self.answer))
             _answer = self.answer
             self.question = self.answer = None
-            return _answer
+            return _answer.strip()
 
 
 class _BackupClass(object):
@@ -282,13 +294,13 @@ class ClausesCreator(_BackupClass):
             return _clause
 
         phonems_string = self.poet_module.browser.get_phonetic_analysis(word)
-        accentuations = self.poet_module.accentuation_dictionary.get_acc(word)
+        accentuation = self.poet_module.accentuation_dictionary.get_acc(word)
 
         syllable = 0
         for ind, symb in enumerate(phonems_string):
             if symb in self.poet_module.vowels:
                 syllable += 1
-                if syllable in accentuations:
+                if syllable == accentuation:
                     _clause = self.database[word] = phonems_string[ind:]
                     self.create_dump()
                     return _clause
@@ -339,49 +351,55 @@ class AccentuationCreator(_SessionParent):
 
     def get_acc(self, word):
         """
-        Возвращает кортеж номеров слогов, где можно поставить ударение.
-        В большинстве случаев число будет одно.
-        Несколько - в словах, с допуском, как "творог".
+        Возвращает номер ударного слога, либо бросает исключение,
+        если слово некорректно, либо имеет больше одного ударения.
         """
         word = word.lower().strip()
-        syllable_numbers = self.database.get(word, None)
-        if isinstance(syllable_numbers, list):
-            return syllable_numbers
-        sylls = self.poet_module.syllable_calculate(word)
+        syllable_number = self.database.get(word, "")
+        if syllable_number is None:
+            raise NotVariantExcept("Слово не имеет ударения.")
+        elif isinstance(syllable_number, int):
+            return syllable_number
+        syll = self.poet_module.syllable_calculate(word)
 
-        if sylls <= 0:
-            syllable_numbers = [0]
-        elif sylls == 1:
-            syllable_numbers = [1]
+        if syll <= 0:
+            syllable_number = None
+        elif syll == 1:
+            syllable_number = 1
         else:
             if 'ё' in word:
-                syllable_numbers = [
-                    self._get_syllable_num(self._yo_formatter(word))
-                ]
+                if word.count('ё') == 1:
+                    syllable_number = self._get_syllable_num(
+                        self._yo_formatter(word)
+                    )
+                else:
+                    syllable_number = None
             else:
-                syllable_numbers = self._get_accentuation(word)
-                for ind, n in enumerate(syllable_numbers[:]):
-                    if n > sylls:
-                        syllable_numbers[ind] = sylls
+                syllable_number = self._get_accentuation(word)
+                if isinstance(syllable_number, int):
+                    if not (0 < syllable_number <= syll):
+                        syllable_number = None
 
-                syllable_numbers = sorted(set(syllable_numbers))
-
-        self.database[word] = syllable_numbers
+        self.database[word] = syllable_number
         self.create_dump()
-        return syllable_numbers
+        if not syllable_number:
+            raise NotVariantExcept("Слово не имеет ударения.")
+        return syllable_number
 
     def _get_acc_letter(self, word):
         """
-        Возвращает номер ударной БУКВЫ. Для поиска рифмы на сайте.
+        Возвращает номер ударной БУКВЫ. Для поиска фонем на сайте.
         """
         word = word.lower().strip()
         syllable = 0
-        syllable_numbers = self.get_acc(word)
+        syllable_number = self.get_acc(word)
+        if not syllable_number:
+            raise NotVariantExcept("Слово не имеет ударения.")
         for ind, let in enumerate(word, 1):
             if let in self.poet_module.vowels:
                 syllable += 1
-            if syllable in syllable_numbers:
-                return ind
+                if syllable == syllable_number:
+                    return ind
         raise NotVariantExcept("Ударение не определено.")
 
     @staticmethod
@@ -410,18 +428,14 @@ class AccentuationCreator(_SessionParent):
 
         question = (
             "[стихомодуль]\r\n"
-            "Где ударение в слове {0!r}?\r\n"
-            "(Ответ - номера слогов, цифрой, через запятую)\r\n"
+            "Где ударение в слове {0!r}?\r\n\r\n"
+            "Ответ - номер ударного слога.\r\n"
+            "Если у слова нет ударения "
+            "(предлог, без гласных, или восклицание вида \"ааааааааааа\"), "
+            "вместо цифры отправляем букву \"N\"."
         ).format(word)
 
-        answer = self.poet_module.user_feedback.ask_to_vk(question)
-
-        for part in answer.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if part.isdigit():
-                yield int(part)
+        return self.poet_module.user_feedback.ask_to_vk(question).lower()
 
     def __get_format_words(self, answer_page):
         """
@@ -440,20 +454,22 @@ class AccentuationCreator(_SessionParent):
         """
         Определяет ударения. Сначала ищет информацию в интернете.
         Если безуспешно - спрашивает пользователя.
-        Возвращает список чисел.
-
+        Возвращает число, либо None.
         """
         _url = self.URL.format(word)
         req = self.get(_url)
         if req.status_code == 200:
             page = BeautifulSoup(req.text, "lxml")
             accs = list(self.__get_format_words(page))
-            if accs:
-                return accs
+            if len(accs) == 1:
+                return accs[0]
+            return None
 
-        words = self.poet_module.browser.get_acc(word)
-        if words:
-            return list(map(self._get_syllable_num, words))
+        format_word = self.poet_module.browser.get_acc(word)
+        if format_word is not False:
+            if isinstance(format_word, str):
+                return self._get_syllable_num(format_word)
+            return None
 
         if not self.poet_module.user_feedback.use_module:
             raise NotVariantExcept("Ударение в сети не найдено.")
@@ -463,9 +479,11 @@ class AccentuationCreator(_SessionParent):
             _counter += 1
             if _counter > self.poet_module.user_feedback.try_count:
                 raise NotVariantExcept("Запросы исчерпаны.")
-            accs = list(self.ask_for_user(word))
-            if accs:
-                return accs
+            acc = self.ask_for_user(word)
+            if acc == "n":
+                return None
+            elif acc.isdigit():
+                return int(acc)
 
 
 class Poem(object):
@@ -695,8 +713,7 @@ class Poem(object):
                 if (_len_before == _len_after) or (try_counter >= 3):
                     self.temp_used_words = frozenset()
 
-    @staticmethod
-    def tuple_to_string(string_tuple):
+    def tuple_to_string(self, string_tuple):
         out_text = ""
         _need_capialize = True
         for token in reversed(string_tuple):
@@ -706,12 +723,13 @@ class Poem(object):
 
             if Poet.ONLY_WORDS.search(token):
                 out_text += " "
+                token = self.poet.get_word_with_acc(token)
             if _need_capialize:
                 _need_capialize = False
                 token = token.title()
             out_text += token
 
-            if Poet.END_TOKENS.search(token):
+            if self.poet.END_TOKENS.search(token):
                 _need_capialize = True
 
         return out_text.strip()
@@ -732,6 +750,7 @@ class Poem(object):
 class Poet(MarkovTextGenerator):
 
     RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
+    ACCENT = chr(769)
     vowels = "ауоыиэяюеёaeiouy"
     tokensBase = "poetModuleTokens"
 
@@ -752,6 +771,26 @@ class Poet(MarkovTextGenerator):
         if not isfile(self.dump_file):
             self.create_dump()
         self.load_dump()
+
+    def get_word_with_acc(self, word):
+        """
+        Возвращает слово, с поставленным ударением,
+        если в нём больше одного слога и нет буквы 'ё'.
+        """
+        word = word.strip().lower()
+        if not self.is_rus_word(word):
+            return word
+        if 'ё' in word:
+            return word
+        if self.syllable_calculate(word) <= 1:
+            return word
+        acc_lt = self.accentuation_dictionary._get_acc_letter(word)
+        out_string = ""
+        for ind, let in enumerate(word, 1):
+            out_string += let
+            if ind == acc_lt:
+                out_string += self.ACCENT
+        return out_string
 
     @classmethod
     def is_rus_word(cls, word):
@@ -866,7 +905,7 @@ class Poet(MarkovTextGenerator):
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
             raise NotRightMeter("Невозможно определить ударение.")
-        _string_now = Poem.tuple_to_string(current_string)
+        _string_now = poem_object.tuple_to_string(current_string)
         if meter:
             _weight = self.is_good_meter(meter, final_meter)
             if not _weight:
@@ -953,12 +992,16 @@ class Poet(MarkovTextGenerator):
         for token in reversed(string_typle):
             if not token.isalpha():
                 continue
-            accentuations = self.accentuation_dictionary.get_acc(token)
-            _syllables = 0
+            if not self.syllable_calculate(token):
+                continue
+            accentuation = self.accentuation_dictionary.get_acc(token)
+            _syllable_counter = 0
             for let in token:
                 if let.lower() in self.vowels:
-                    _syllables += 1
-                    result += str(int(bool((_syllables in accentuations))))
+                    _syllable_counter += 1
+                    result += str(
+                        int(bool((_syllable_counter == accentuation)))
+                    )
         return result
 
     def _syll_calculate_in_tuple(self, string):
