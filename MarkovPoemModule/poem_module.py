@@ -297,13 +297,17 @@ class ClausesCreator(_BackupClass):
         accentuation = self.poet_module.accentuation_dictionary.get_acc(word)
 
         syllable = 0
+        last_symb = ""
         for ind, symb in enumerate(phonems_string):
             if symb in self.poet_module.vowels:
                 syllable += 1
                 if syllable == accentuation:
+                    if ind and (last_symb == "'"):
+                        ind -= 1
                     _clause = self.database[word] = phonems_string[ind:]
                     self.create_dump()
                     return _clause
+            last_symb = symb
 
 
 class SynonymsCreator(_SessionParent):
