@@ -14,6 +14,7 @@ from itertools import cycle
 from re import compile as re_compile
 from itertools import count
 from shutil import copy2
+from RusPhonetic.phonetic_module import Phonetic
 from os import (
     remove,
     path
@@ -61,8 +62,6 @@ class StringIsFull(Exception):
 
 class BrowserClass(Chrome):
 
-    spaces = re_compile("\s+")
-
     morpherURL = "http://morpher.ru/accentizer"
     morpherTextArea = (
         By.ID,
@@ -73,16 +72,6 @@ class BrowserClass(Chrome):
         "ctl00_ctl00_BodyPlaceHolder_ContentPlaceHolder1_SubmitButton"
     )
 
-    phoneticURL = "https://vnutrislova.net/выбор-ударения/{0}"
-    phonecticResult = (
-        By.CSS_SELECTOR,
-        "#result > div.phonetic > p.h2.space-top > span"
-    )
-    phoneticConfirm = (
-        By.CSS_SELECTOR,
-        "#submit"
-    )
-
     def __init__(self, poet_module, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.poet_module = poet_module
@@ -91,30 +80,6 @@ class BrowserClass(Chrome):
 
         if self.poet_module.browser is not self:
             self.poet_module.browser = self
-
-    @staticmethod
-    def phoneticLetter(letNum):
-        return (
-            By.XPATH,
-            '//*[@id="accent_selection_form"]/div[{0}]/label'.format(letNum)
-        )
-
-    def get_phonetic_analysis(self, word):
-
-        word = word.lower().strip()
-        letNum = (
-            self.poet_module.accentuation_dictionary._get_acc_letter(word)
-        )
-        _url = self.phoneticURL.format(word)
-        with self.__browser_lock:
-            self.get(_url)
-            letterButton = self._wait_element(self.phoneticLetter(letNum))
-            letterButton.click()
-            confirmButton = self._wait_element(self.phoneticConfirm)
-            confirmButton.click()
-            result = self._wait_element(self.phonecticResult)
-            result = result.text[1:-1].strip()
-            return result
 
     def format_word(self, word):
         """
@@ -196,7 +161,7 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.__use_module = self.__get_module_switcher(True)
+        self.__use_module = self.__get_module_switcher(False)
 
     @property
     def use_module(self):
@@ -293,8 +258,9 @@ class ClausesCreator(_BackupClass):
         if _clause is not None:
             return _clause
 
-        phonems_string = self.poet_module.browser.get_phonetic_analysis(word)
         accentuation = self.poet_module.accentuation_dictionary.get_acc(word)
+        phonetic_object = Phonetic(word=word, acc=accentuation)
+        phonems_string = phonetic_object.get_phonetic()
 
         syllable = 0
         last_symb = ""
@@ -392,7 +358,7 @@ class AccentuationCreator(_SessionParent):
 
     def _get_acc_letter(self, word):
         """
-        Возвращает номер ударной БУКВЫ. Для поиска фонем на сайте.
+        Возвращает номер ударной БУКВЫ.
         """
         word = word.lower().strip()
         syllable = 0
@@ -755,7 +721,7 @@ class Poet(MarkovTextGenerator):
 
     RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
     ACCENT = chr(769)
-    vowels = "ауоыиэяюеёaeiouy"
+    vowels = "ауоыиэяюеё"
     tokensBase = "poetModuleTokens"
 
     def __init__(self, chain_order=2, **kwargs):
