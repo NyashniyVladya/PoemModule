@@ -14,7 +14,7 @@ from itertools import cycle
 from re import compile as re_compile
 from itertools import count
 from shutil import copy2
-from RusPhonetic.phonetic_module import Phonetic
+from RusPhonetic import phonetic_module
 from os import (
     remove,
     path
@@ -259,7 +259,7 @@ class ClausesCreator(_BackupClass):
             return _clause
 
         accentuation = self.poet_module.accentuation_dictionary.get_acc(word)
-        phonetic_object = Phonetic(word=word, acc=accentuation)
+        phonetic_object = phonetic_module.Phonetic(word=word, acc=accentuation)
         phonems_string = phonetic_object.get_phonetic()
 
         syllable = 0
@@ -292,7 +292,7 @@ class SynonymsCreator(_SessionParent):
                 break
             word_elem = tuple(element.childGenerator())[-2]
             word = word_elem.getText().lower().strip()
-            if self.poet_module.rhyme_dictionary.is_rus_word(word):
+            if self.poet_module.is_rus_word(word):
                 yield word
 
     def get_synonyms(self, word):
@@ -628,7 +628,7 @@ class Poem(object):
                 if word_for_rhyme:
                     _loop_counter += 1
 
-                if _loop_counter > 75:
+                if _loop_counter > 50:
                     break
 
                 try:
@@ -721,13 +721,11 @@ class Poet(MarkovTextGenerator):
 
     RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
     ACCENT = chr(769)
-    vowels = "ауоыиэяюеё"
-    tokensBase = "poetModuleTokens"
+    vowels = phonetic_module.Letter.vowels
 
     def __init__(self, chain_order=2, **kwargs):
         super().__init__(chain_order=chain_order, **kwargs)
 
-        ##  self.rhyme_dictionary = RhymeCreator(poet_module=self)
         self.clauses_dictionary = ClausesCreator(poet_module=self)
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
@@ -889,10 +887,7 @@ class Poet(MarkovTextGenerator):
         _weights = []
         variants_list = list(frozenset(variants))
         shuffle(variants_list)
-        for token in variants_list:
-            if len(good_variants) > 10:
-                #  Иначе цикл может затянуться на несколько тысяч итераций.
-                break
+        for _, token in zip(range(15), variants_list):
             if not self.is_rus_word(token):
                 if need_rhyme and (len(current_string) >= 3):
                     continue
