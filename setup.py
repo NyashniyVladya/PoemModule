@@ -16,6 +16,7 @@ setup(
     ],
     install_requires=[
         "MarkovTextGenerator>=1.5.8",
+        "RusPhonetic>=1.0.1",
         "bs4",
         "selenium",
         "shutil"
