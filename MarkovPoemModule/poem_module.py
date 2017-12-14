@@ -161,7 +161,7 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.__use_module = self.__get_module_switcher(False)
+        self.__use_module = self.__get_module_switcher(True)
 
     @property
     def use_module(self):
@@ -245,18 +245,13 @@ class _SessionParent(_BackupClass, Session):
         )
 
 
-class ClausesCreator(_BackupClass):
+class RhymeCreator(object):
 
     def __init__(self, poet_module):
-        super().__init__("clauses")
 
         self.poet_module = poet_module
 
     def get_clause(self, word):
-        word = word.lower().strip()
-        _clause = self.database.get(word, None)
-        if _clause is not None:
-            return _clause
 
         accentuation = self.poet_module.accentuation_dictionary.get_acc(word)
         phonetic_object = phonetic_module.Phonetic(word=word, acc=accentuation)
@@ -270,9 +265,7 @@ class ClausesCreator(_BackupClass):
                 if syllable == accentuation:
                     if ind and (last_symb == "'"):
                         ind -= 1
-                    _clause = self.database[word] = phonems_string[ind:]
-                    self.create_dump()
-                    return _clause
+                    return phonems_string[ind:]
             last_symb = symb
 
 
@@ -726,7 +719,7 @@ class Poet(MarkovTextGenerator):
     def __init__(self, chain_order=2, **kwargs):
         super().__init__(chain_order=chain_order, **kwargs)
 
-        self.clauses_dictionary = ClausesCreator(poet_module=self)
+        self.rhyme_creator = RhymeCreator(poet_module=self)
         self.accentuation_dictionary = AccentuationCreator(poet_module=self)
         self.synonyms_dictionary = SynonymsCreator(poet_module=self)
         self.user_feedback = UserFeedback(poet_module=self)
@@ -800,8 +793,8 @@ class Poet(MarkovTextGenerator):
         Возвращает булевое значение, рифмуются ли два переданных слова.
         """
         if self._is_correct_tok(word1) and self._is_correct_tok(word2):
-            clause1 = self.clauses_dictionary.get_clause(word1)
-            clause2 = self.clauses_dictionary.get_clause(word2)
+            clause1 = self.rhyme_creator.get_clause(word1)
+            clause2 = self.rhyme_creator.get_clause(word2)
             if clause1 == clause2:
                 return True
         return False
@@ -873,7 +866,6 @@ class Poet(MarkovTextGenerator):
             meter = self.get_string_meter(current_string)
         except NotVariantExcept:
             raise NotRightMeter("Невозможно определить ударение.")
-        _string_now = poem_object.tuple_to_string(current_string)
         if meter:
             _weight = self.is_good_meter(meter, final_meter)
             if not _weight:
@@ -881,7 +873,7 @@ class Poet(MarkovTextGenerator):
             elif _weight == self._const_fullstring_weight:
                 if need_rhyme:
                     raise NotRightMeter("Рифма не найдена.")
-                print(_string_now)
+                print(poem_object.tuple_to_string(current_string))
                 raise StringIsFull("Строка готова.")
         good_variants = []
         _weights = []
