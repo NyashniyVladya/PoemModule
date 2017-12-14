@@ -161,7 +161,7 @@ class UserFeedback(object):
         self.wait_time = float(wait_time)
         self.try_count = int(try_count)
 
-        self.__use_module = self.__get_module_switcher(True)
+        self.__use_module = self.__get_module_switcher(False)
 
     @property
     def use_module(self):
@@ -712,7 +712,6 @@ class Poem(object):
 
 class Poet(MarkovTextGenerator):
 
-    RUS = tuple(map(chr, range(1072, 1104))) + ("ё",)
     ACCENT = chr(769)
     vowels = phonetic_module.Letter.vowels
 
@@ -753,12 +752,6 @@ class Poet(MarkovTextGenerator):
                 out_string += self.ACCENT
         return out_string
 
-    @classmethod
-    def is_rus_word(cls, word):
-        if not word:
-            return False
-        return all(map(lambda s: (s.lower() in cls.RUS), word))
-
     def create_dump(self):
         _dump_data = {
             "poems": self.poems,
@@ -778,10 +771,6 @@ class Poet(MarkovTextGenerator):
         self.tokens_array = tuple(_dump_data["tokens"])
         self.vocabulars_in_tokens = _dump_data["vocabulars"]
         self.create_base()
-
-    def create_base(self):
-        super().create_base()
-        self.start_arrays = tuple(frozenset(self.get_corrected_start_arrays()))
 
     def _is_correct_tok(self, tok):
         if self.is_rus_word(tok) and self.syllable_calculate(tok):
@@ -811,27 +800,6 @@ class Poet(MarkovTextGenerator):
                 return s
             break
         return None
-
-    def token_is_correct(self, token):
-        """
-        Подходит ли токен, для генерации стиха.
-        Допускаются русские слова, знаки препинания и символы начала и конца.
-        """
-        if self.is_rus_word(token):
-            return True
-        elif self.ONLY_MARKS.search(token):
-            return True
-        elif self.END_TOKENS.search(token):
-            return True
-        elif token in "$^":
-            return True
-        return False
-
-    def get_corrected_start_arrays(self):
-
-        for tokens in self.start_arrays:
-            if all(map(self.token_is_correct, tokens)):
-                yield tokens
 
     def get_optimal_variant(
         self,
