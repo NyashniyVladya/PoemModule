@@ -31,7 +31,8 @@ from time import (
 from os.path import (
     abspath,
     isfile,
-    expanduser
+    expanduser,
+    join as os_join
 )
 from MarkovTextGenerator.markov_text_generator import (
     MarkovTextGenerator,
@@ -212,7 +213,13 @@ class _BackupClass(object):
 
     def __init__(self, file_db):
         self.database = {}
-        self.file_database = abspath(expanduser("~\\{0}.json".format(file_db)))
+        self.file_database = abspath(
+            os_join(
+                expanduser("~"),
+                "{0}.json".format(file_db)
+            )
+        )
+
         if not isfile(self.file_database):
             self.create_dump()
         self.load_dump()
@@ -727,7 +734,9 @@ class Poet(MarkovTextGenerator):
         self.vocabulars_in_tokens = []
         self._const_fullstring_weight = int(1e8)
 
-        self.dump_file = abspath(expanduser("~\\poemModuleDatabase.json"))
+        self.dump_file = abspath(
+            os_join(expanduser("~"), "poemModuleDatabase.json")
+        )
         if not isfile(self.dump_file):
             self.create_dump()
         self.load_dump()
