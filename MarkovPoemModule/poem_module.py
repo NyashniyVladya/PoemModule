@@ -6,6 +6,7 @@
 """
 
 import json
+from time import time
 from urllib import parse
 from requests import Session
 from threading import Lock
@@ -23,10 +24,6 @@ from random import (
     choices,
     choice,
     shuffle
-)
-from time import (
-    sleep,
-    time
 )
 from os.path import (
     abspath,
@@ -171,42 +168,23 @@ class UserFeedback(object):
     def __get_module_switcher(self, use_module=True):
         if use_module:
             if self.poet_module.vk_object:
-                if self.poet_module.vk_object.poem_module_testers:
+                if self.poet_module.poem_module_testers:
                     return True
         return False
 
     def ask_to_vk(self, question_text):
-        with self.__lock:
-            if not self.use_module:
-                return ""
-            self.question = (
-                self.poet_module.vk_object._feedback_text_title + question_text
-            )
-            self.answer = None
-            _user_for_question = choice(
-                self.poet_module.vk_object.poem_module_testers
-            )
-            while True:
-                if self.poet_module.vk_object.sent(
-                    target=_user_for_question,
-                    text=self.question
-                ):
-                    break
-                sleep(1.)
 
-            print("Ожидание ответа...")
-            _start_wait_time = time()
-            while not self.answer:
-                if (time() - _start_wait_time) >= self.wait_time:
-                    self.answer = ""
-                    print("Время ожидания вышло.")
-                    break
-                sleep(1.)
-            else:
-                print("Ответ {0!r} получен.".format(self.answer))
-            _answer = self.answer
-            self.question = self.answer = None
-            return _answer.strip()
+        _user_for_question = choice(
+            self.poet_module.poem_module_testers
+        )
+        answers = self.poet_module.vk_object.user_feedback_module.ask_question(
+            target=_user_for_question,
+            message=question_text,
+            module_prefixes=["[модуль-написания-стихов]"],
+            timeout_occurred=60.,
+            endlessly=True
+        )
+        return answers[0].body.strip()
 
 
 class _BackupClass(object):
@@ -733,6 +711,8 @@ class Poet(MarkovTextGenerator):
         self.poems = []
         self.vocabulars_in_tokens = []
         self._const_fullstring_weight = int(1e8)
+
+        self.poem_module_testers = []
 
         self.dump_file = abspath(
             os_join(expanduser("~"), "poemModuleDatabase.json")
